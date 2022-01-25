@@ -46,8 +46,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 event_queue.dispatch_pending(&mut data)?;
                 event_queue.flush()?;
             }
-            Some(requet) = rx.recv() => {
-                let Request::SetColor(color) = requet;
+            Some(request) = rx.recv() => {
+                let Request::SetColor(color) = request;
                 data.color = color;
                 dirty = true;
             }

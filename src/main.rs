@@ -122,9 +122,9 @@ impl AppData {
         }
     }
 
-    fn set_temp(&self, conn: &mut ConnectionHandle) -> anyhow::Result<bool> {
+    fn set_temp(&mut self, conn: &mut ConnectionHandle) -> anyhow::Result<bool> {
         let mut has_uninit = false;
-        for output in self.outputs.values() {
+        for output in self.outputs.values_mut() {
             if let Some((gamma_control, ramp_size)) = &output.gamma_control {
                 let ramp_size = ramp_size.load(Ordering::SeqCst) as usize;
                 if ramp_size == 0 {
@@ -145,6 +145,7 @@ impl AppData {
                     colorramp_fill(r, g, b, ramp_size, self.color);
                     mmap.flush()?;
                     gamma_control.set_gamma(conn, file.as_raw_fd());
+                    output.color = self.color;
                 }
             }
         }
@@ -358,8 +359,8 @@ fn colorramp_fill(r: &mut [u16], g: &mut [u16], b: &mut [u16], ramp_size: usize,
     let temp_index = ((temp as usize - 1000) / 100) * 3;
     let white_point = interpolate_color(
         (temp % 100) as f64 / 100.0,
-        &BLACKBODY_COLOR[temp_index..(temp_index + 3)],
-        &BLACKBODY_COLOR[(temp_index + 3)..(temp_index + 6)],
+        &BLACKBODY_COLOR[temp_index..],
+        &BLACKBODY_COLOR[(temp_index + 3)..],
     );
 
     for i in 0..ramp_size {

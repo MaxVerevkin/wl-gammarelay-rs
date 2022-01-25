@@ -32,11 +32,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut data = AppData {
         color: Default::default(),
-        new_outputs: false,
+        pending_updates: false,
         outputs: HashMap::new(),
         manager: None,
     };
-    let mut dirty = false;
+
+    event_queue.dispatch_pending(&mut data)?;
+    event_queue.flush()?;
 
     loop {
         tokio::select! {
@@ -48,21 +50,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Some(request) = rx.recv() => {
                 let Request::SetColor(color) = request;
-                data.color = color;
-                dirty = true;
+                data.set_color(color);
             }
         }
 
-        if dirty {
-            dirty = !data.set_temp(&mut conn.handle())?;
+        if data.pending_updates {
+            data.apply_color(&mut conn.handle())?;
             event_queue.flush()?;
-        }
-
-        if data.new_outputs {
-            data.init_outputs(&mut conn.handle(), &qh);
-            event_queue.flush()?;
-            data.new_outputs = false;
-            dirty = true;
         }
     }
 }
@@ -70,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[derive(Debug)]
 struct AppData {
     color: Color,
-    new_outputs: bool,
+    pending_updates: bool,
     outputs: HashMap<u32, Output>,
     manager: Option<gamma_control_manager::ZwlrGammaControlManagerV1>,
 }
@@ -108,27 +102,18 @@ unsafe fn bytes_to_shorts<'a>(bytes: &'a mut [u8]) -> &'a mut [u16] {
 }
 
 impl AppData {
-    fn init_outputs(&mut self, conn: &mut ConnectionHandle, qh: &QueueHandle<Self>) {
-        if let Some(manager) = &self.manager {
-            for output in self.outputs.values_mut() {
-                if output.gamma_control.is_none() {
-                    let ramp_size = Arc::new(AtomicU32::new(0));
-                    let gamma = manager
-                        .get_gamma_control(conn, &output.output, qh, ramp_size.clone())
-                        .unwrap();
-                    output.gamma_control = Some((gamma, ramp_size));
-                }
-            }
-        }
+    fn set_color(&mut self, color: Color) {
+        self.color = color;
+        self.pending_updates = true;
     }
 
-    fn set_temp(&mut self, conn: &mut ConnectionHandle) -> anyhow::Result<bool> {
-        let mut has_uninit = false;
+    fn apply_color(&mut self, conn: &mut ConnectionHandle) -> anyhow::Result<()> {
+        self.pending_updates = false;
         for output in self.outputs.values_mut() {
             if let Some((gamma_control, ramp_size)) = &output.gamma_control {
                 let ramp_size = ramp_size.load(Ordering::SeqCst) as usize;
                 if ramp_size == 0 {
-                    has_uninit = true;
+                    self.pending_updates = true;
                     continue;
                 }
                 if self.color != output.color {
@@ -149,7 +134,7 @@ impl AppData {
                 }
             }
         }
-        Ok(!has_uninit)
+        Ok(())
     }
 }
 
@@ -171,27 +156,31 @@ impl Dispatch<wl_registry::WlRegistry> for AppData {
                 version,
             } => match interface.as_str() {
                 "wl_output" => {
-                    self.new_outputs = true;
+                    eprintln!("New output: {name}");
                     self.outputs.insert(
                         name,
                         Output {
                             color: Default::default(),
                             gamma_control: None,
-                            output: registry.bind(conn, name, version, qh, ()).unwrap(),
+                            output: registry.bind(conn, name, version, qh, name).unwrap(),
                         },
                     );
                 }
                 "zwlr_gamma_control_manager_v1" => {
+                    eprintln!("Found gamma control manager");
                     self.manager = Some(registry.bind(conn, name, version, qh, ()).unwrap());
                 }
                 _ => (),
             },
             wl_registry::Event::GlobalRemove { name } => {
                 if let Some(output) = self.outputs.remove(&name) {
+                    eprintln!("Output removed: {name}");
                     output.output.release(conn);
                     if let Some((gamma_control, _)) = output.gamma_control {
                         gamma_control.destroy(conn);
                     }
+                } else {
+                    eprintln!("Unknown name removed: {name}");
                 }
             }
             _ => (),
@@ -200,16 +189,30 @@ impl Dispatch<wl_registry::WlRegistry> for AppData {
 }
 
 impl Dispatch<wl_output::WlOutput> for AppData {
-    type UserData = ();
+    /// output_name
+    type UserData = u32;
 
     fn event(
         &mut self,
-        _: &wl_output::WlOutput,
-        _: wl_output::Event,
-        _: &Self::UserData,
-        _: &mut ConnectionHandle,
-        _: &QueueHandle<Self>,
+        output: &wl_output::WlOutput,
+        e: wl_output::Event,
+        name: &Self::UserData,
+        conn: &mut ConnectionHandle,
+        qh: &QueueHandle<Self>,
     ) {
+        if let wl_output::Event::Done = e {
+            if let Some(manager) = &self.manager {
+                let ramp_size = Arc::new(AtomicU32::new(0));
+                let gamma = manager
+                    .get_gamma_control(conn, output, qh, (*name, ramp_size.clone()))
+                    .unwrap();
+                self.outputs.get_mut(name).unwrap().gamma_control = Some((gamma, ramp_size));
+                self.pending_updates = true;
+                eprintln!("Output {name} initialized");
+            } else {
+                eprintln!("Cannot initialize output {name}: no gamma control manager");
+            }
+        }
     }
 }
 
@@ -224,24 +227,29 @@ impl Dispatch<gamma_control_manager::ZwlrGammaControlManagerV1> for AppData {
         _: &mut ConnectionHandle,
         _: &QueueHandle<Self>,
     ) {
+        // No events
     }
 }
 
 impl Dispatch<gamma_control::ZwlrGammaControlV1> for AppData {
-    type UserData = Arc<AtomicU32>;
+    /// (output_name, ramp_size)
+    type UserData = (u32, Arc<AtomicU32>);
 
     fn event(
         &mut self,
-        _: &gamma_control::ZwlrGammaControlV1,
+        gamma_ctrl: &gamma_control::ZwlrGammaControlV1,
         event: gamma_control::Event,
-        data: &Self::UserData,
-        _: &mut ConnectionHandle,
+        (name, ramp_size): &Self::UserData,
+        conn: &mut ConnectionHandle,
         _: &QueueHandle<Self>,
     ) {
         if let gamma_control::Event::GammaSize { size } = event {
-            data.store(size, Ordering::SeqCst)
+            eprintln!("Output {name}: ramp_size = {size}");
+            ramp_size.store(size, Ordering::SeqCst)
         } else if let gamma_control::Event::Failed = event {
-            eprintln!("Failed!");
+            eprintln!("Output {name} failed: destroying it's gamma control");
+            self.outputs.get_mut(name).unwrap().gamma_control = None;
+            gamma_ctrl.destroy(conn);
         }
     }
 }

@@ -13,6 +13,12 @@ NAME               TYPE      SIGNATURE RESULT/VALUE FLAGS
 .Temperature       property  q         6510         emits-change writable
 ```
 
+## Installation
+
+```sh
+cargo install wl-gammarelay-rs
+```
+
 ## Example usage
 
 Set the temperature to `5000`:

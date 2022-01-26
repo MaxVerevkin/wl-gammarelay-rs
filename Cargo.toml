@@ -1,9 +1,12 @@
 [package]
 name = "wl-gammarelay-rs"
 version = "0.1.0"
-license = "GPL-3.0-only"
-edition = "2021"
 authors = ["Max Verevkin <maxxverrr@gmail.com>"]
+edition = "2021"
+description = "A simple program that provides DBus interface to control display temperature and brightness under wayland without flickering"
+repository = "https://github.com/MaxVerevkin/wl-gammarelay-rs"
+license = "GPL-3.0-only"
+keywords = ["redshift", "gammastep", "wayland", "night-mode"]
 
 [dependencies]
 anyhow = "1.0"

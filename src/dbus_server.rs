@@ -63,6 +63,17 @@ impl Server {
         }
     }
 
+    async fn update_temperature(
+        &mut self,
+        #[zbus(signal_context)] cx: zbus::SignalContext<'_>,
+        delta_temp: i16,
+    ) -> Result<(), zbus::fdo::Error> {
+        self.color.temp = (self.color.temp as i16 + delta_temp).clamp(1_000, 10_000) as _;
+        self.send_color().await;
+        self.temperature_changed(&cx).await?;
+        Ok(())
+    }
+
     #[dbus_interface(property)]
     async fn brightness(&self) -> f64 {
         self.color.brightness
@@ -81,23 +92,33 @@ impl Server {
         }
     }
 
-    async fn update_temperature(
-        &mut self,
-        #[zbus(signal_context)] cx: zbus::SignalContext<'_>,
-        delta_temp: i16,
-    ) -> Result<(), zbus::fdo::Error> {
-        self.color.temp = (self.color.temp as i16 + delta_temp).clamp(1_000, 10_000) as _;
-        self.send_color().await;
-        self.temperature_changed(&cx).await?;
-        Ok(())
-    }
-
     async fn update_brightness(
         &mut self,
         #[zbus(signal_context)] cx: zbus::SignalContext<'_>,
         delta_brightness: f64,
     ) -> Result<(), zbus::fdo::Error> {
         self.color.brightness = (self.color.brightness + delta_brightness).clamp(0.0, 1.0) as _;
+        self.send_color().await;
+        self.brightness_changed(&cx).await?;
+        Ok(())
+    }
+
+    #[dbus_interface(property)]
+    async fn inverted(&self) -> bool {
+        self.color.inverted
+    }
+
+    #[dbus_interface(property)]
+    async fn set_inverted(&mut self, value: bool) {
+        self.color.inverted = value;
+        self.send_color().await;
+    }
+
+    async fn toggle_inverted(
+        &mut self,
+        #[zbus(signal_context)] cx: zbus::SignalContext<'_>,
+    ) -> Result<(), zbus::fdo::Error> {
+        self.color.inverted = !self.color.inverted;
         self.send_color().await;
         self.brightness_changed(&cx).await?;
         Ok(())

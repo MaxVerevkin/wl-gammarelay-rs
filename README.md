@@ -7,10 +7,12 @@ Like [`wl-gammarelay`](https://github.com/jeremija/wl-gammarelay), but written i
 ```
 $ busctl --user introspect rs.wl-gammarelay / rs.wl.gammarelay
 NAME               TYPE      SIGNATURE RESULT/VALUE FLAGS
+.ToggleInverted    method    -         -            -
 .UpdateBrightness  method    d         -            -
 .UpdateTemperature method    n         -            -
 .Brightness        property  d         1            emits-change writable
-.Temperature       property  q         6510         emits-change writable
+.Inverted          property  b         false        emits-change writable
+.Temperature       property  q         4500         emits-change writable
 ```
 
 ## Installation
@@ -69,6 +71,12 @@ busctl --user call rs.wl-gammarelay / rs.wl.gammarelay UpdateTemperature n 100
 
 # Decrease the temperature by `100`:
 busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateTemperature n -100
+
+# Invert colors
+busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Inverted b true
+
+# Toggle inverted colors
+busctl --user call rs.wl-gammarelay / rs.wl.gammarelay ToggleInverted
 
 # Set the brightness to `100%`:
 busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d 1

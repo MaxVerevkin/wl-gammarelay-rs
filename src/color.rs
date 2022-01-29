@@ -3,6 +3,7 @@
 pub struct Color {
     pub temp: u16,
     pub brightness: f64,
+    pub inverted: bool,
 }
 
 impl Default for Color {
@@ -10,6 +11,7 @@ impl Default for Color {
         Self {
             temp: 6500,
             brightness: 1.0,
+            inverted: false,
         }
     }
 }
@@ -25,9 +27,15 @@ pub fn colorramp_fill(r: &mut [u16], g: &mut [u16], b: &mut [u16], ramp_size: us
     let step = u16::MAX as f64 * color.brightness / (ramp_size - 1) as f64;
     for i in 0..ramp_size {
         let v = step * i as f64;
-        r[i] = (v * white_r) as u16;
-        g[i] = (v * white_g) as u16;
-        b[i] = (v * white_b) as u16;
+        if !color.inverted {
+            r[i] = (v * white_r) as u16;
+            g[i] = (v * white_g) as u16;
+            b[i] = (v * white_b) as u16;
+        } else {
+            r[i] = u16::MAX - (v * white_r) as u16;
+            g[i] = u16::MAX - (v * white_g) as u16;
+            b[i] = u16::MAX - (v * white_b) as u16;
+        }
     }
 }
 

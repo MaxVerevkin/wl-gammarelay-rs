@@ -46,7 +46,7 @@ i3status-rust hueshift block has the builtin support for this backend on the [`a
 
 ## Watch for changes
 
-You can run `wl-gammarelay-rs watch <format>` to watch for changes. Each time some property changes, a new line will be printed based on <format> string. `{t}` expands into temperature, `{b}` into brightness (0 to 1) and {bp} expands into brightness in percents (0 to 100).
+You can run `wl-gammarelay-rs watch <format>` to watch for changes. Each time some property changes, a new line will be printed based on <format> string. `{t}` expands into temperature, `{b}` into brightness (0 to 1) and `{bp}` expands into brightness in percents (0 to 100).
 
 For example, if you want to monitor both temperature and brightness (in percents), you can run
 ```sh

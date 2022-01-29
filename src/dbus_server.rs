@@ -1,45 +1,43 @@
-use crate::Color;
+use crate::color::Color;
+use crate::wayland::Request;
 use anyhow::Result;
 use tokio::sync::mpsc;
 use zbus::dbus_interface;
 
 #[derive(Debug)]
-pub struct Server {
+struct Server {
     tx: mpsc::Sender<Request>,
     color: Color,
 }
 
-#[derive(Debug)]
-pub enum Request {
-    SetColor(Color),
+pub async fn run(tx: mpsc::Sender<Request>) -> Result<bool> {
+    let zbus::Address::Unix(addr) = zbus::Address::session()?;
+    let stream = tokio::net::UnixStream::connect(addr).await?;
+    let conn = match zbus::ConnectionBuilder::socket(stream)
+        .internal_executor(false)
+        .serve_at(
+            "/",
+            Server {
+                tx,
+                color: Default::default(),
+            },
+        )?
+        .name("rs.wl-gammarelay")?
+        .build()
+        .await
+    {
+        Err(zbus::Error::NameTaken) => return Ok(false),
+        other => other?,
+    };
+    tokio::spawn(async move {
+        loop {
+            conn.executor().tick().await;
+        }
+    });
+    Ok(true)
 }
 
 impl Server {
-    pub fn new(tx: mpsc::Sender<Request>) -> Self {
-        Self {
-            tx,
-            color: Default::default(),
-        }
-    }
-
-    pub async fn run(self) -> Result<()> {
-        let stream = match zbus::Address::session().unwrap() {
-            zbus::Address::Unix(s) => tokio::net::UnixStream::connect(s).await?,
-        };
-        let conn = zbus::ConnectionBuilder::socket(stream)
-            .internal_executor(false)
-            .serve_at("/", self)?
-            .name("rs.wl-gammarelay")?
-            .build()
-            .await?;
-        tokio::spawn(async move {
-            loop {
-                conn.executor().tick().await;
-            }
-        });
-        Ok(())
-    }
-
     async fn send_color(&self) {
         let _ = self.tx.send(Request::SetColor(self.color)).await;
     }
@@ -101,7 +99,7 @@ impl Server {
     ) -> Result<(), zbus::fdo::Error> {
         self.color.brightness = (self.color.brightness + delta_brightness).clamp(0.0, 1.0) as _;
         self.send_color().await;
-        self.temperature_changed(&cx).await?;
+        self.brightness_changed(&cx).await?;
         Ok(())
     }
 }

@@ -11,9 +11,11 @@ keywords = ["redshift", "gammastep", "wayland", "night-mode"]
 [dependencies]
 anyhow = "1.0"
 memmap = "0.7"
+futures = "0.3"
 wayland-client = "0.30.0-alpha3"
 wayland-protocols = { version = "0.30.0-alpha3", features = ["unstable_protocols", "client"] }
 zbus = { version = "2.0", features = ["tokio"] }
+clap = { version = "3.0", features = ["derive"] }
 
 [dependencies.tokio]
 version = "1.15"

@@ -1,6 +1,6 @@
 use crate::color::Color;
 use crate::wayland::Request;
-use anyhow::Result;
+use anyhow::{Error, Result};
 use tokio::sync::mpsc;
 use zbus::dbus_interface;
 
@@ -11,7 +11,10 @@ struct Server {
 }
 
 pub async fn run(tx: mpsc::Sender<Request>) -> Result<bool> {
-    let zbus::Address::Unix(addr) = zbus::Address::session()?;
+    let addr = match zbus::Address::session()? {
+        zbus::Address::Unix(addr) => addr,
+        _ => return Err(Error::msg("DBus: unsuported bus address")),
+    };
     let stream = tokio::net::UnixStream::connect(addr).await?;
     let conn = match zbus::ConnectionBuilder::socket(stream)
         .internal_executor(false)

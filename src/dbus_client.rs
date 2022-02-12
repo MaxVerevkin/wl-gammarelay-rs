@@ -1,9 +1,12 @@
-use anyhow::Result;
+use anyhow::{Error, Result};
 use futures::stream::StreamExt;
 use zbus::dbus_proxy;
 
 pub async fn watch_dbus(format: &str) -> Result<()> {
-    let zbus::Address::Unix(addr) = zbus::Address::session()?;
+    let addr = match zbus::Address::session()? {
+        zbus::Address::Unix(addr) => addr,
+        _ => return Err(Error::msg("DBus: unsuported bus address")),
+    };
     let stream = tokio::net::UnixStream::connect(addr).await?;
     let conn = zbus::ConnectionBuilder::socket(stream)
         .internal_executor(false)

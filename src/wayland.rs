@@ -103,18 +103,13 @@ impl AppData {
                     continue;
                 }
                 if self.color != output.color {
-                    let file = std::fs::OpenOptions::new()
-                        .read(true)
-                        .write(true)
-                        .create(true)
-                        .open("/tmp/wl-gammarelay-rs-temp")?;
-                    file.set_len(ramp_size as u64 * 6)?;
-                    let mut mmap = unsafe { memmap::MmapMut::map_mut(&file)? };
+                    let file = memfd::MemfdOptions::new().create("ramp")?;
+                    file.as_file().set_len(ramp_size as u64 * 6)?;
+                    let mut mmap = unsafe { memmap::MmapMut::map_mut(file.as_file())? };
                     let buf = unsafe { bytes_to_shorts(&mut *mmap) };
                     let (r, rest) = buf.split_at_mut(ramp_size);
                     let (g, b) = rest.split_at_mut(ramp_size);
                     colorramp_fill(r, g, b, ramp_size, self.color);
-                    mmap.flush()?;
                     gamma_control.set_gamma(conn, file.as_raw_fd());
                     output.color = self.color;
                 }

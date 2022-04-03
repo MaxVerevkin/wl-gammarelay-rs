@@ -9,7 +9,9 @@ use wayland_protocols::wlr::unstable::gamma_control::v1::client::{
 use anyhow::Result;
 
 use std::collections::HashMap;
-use std::os::unix::io::AsRawFd;
+use std::ffi::CStr;
+use std::fs::File;
+use std::os::unix::io::FromRawFd;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -103,14 +105,17 @@ impl AppData {
                     continue;
                 }
                 if self.color != output.color {
-                    let file = memfd::MemfdOptions::new().create("ramp")?;
-                    file.as_file().set_len(ramp_size as u64 * 6)?;
-                    let mut mmap = unsafe { memmap::MmapMut::map_mut(file.as_file())? };
+                    let fd = shmemfdrs::create_shmem(
+                        CStr::from_bytes_with_nul(b"/ramp-buffer\0").unwrap(),
+                        ramp_size * 6,
+                    );
+                    let file = unsafe { File::from_raw_fd(fd) };
+                    let mut mmap = unsafe { memmap::MmapMut::map_mut(&file)? };
                     let buf = unsafe { bytes_to_shorts(&mut *mmap) };
                     let (r, rest) = buf.split_at_mut(ramp_size);
                     let (g, b) = rest.split_at_mut(ramp_size);
                     colorramp_fill(r, g, b, ramp_size, self.color);
-                    gamma_control.set_gamma(conn, file.as_raw_fd());
+                    gamma_control.set_gamma(conn, fd);
                     output.color = self.color;
                 }
             }

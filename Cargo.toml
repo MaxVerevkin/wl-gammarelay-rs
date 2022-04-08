@@ -15,8 +15,8 @@ shmemfdrs = { version = "0.1", features = ["memfd"] }
 futures = "0.3"
 wayland-client = "0.30.0-alpha8"
 wayland-protocols = { version = "0.30.0-alpha8", features = [
-    "unstable_protocols",
-    "client",
+  "unstable_protocols",
+  "client",
 ] }
 zbus = { version = "2.1", default-features = false, features = ["tokio"] }
 clap = { version = "3.0", features = ["derive"] }

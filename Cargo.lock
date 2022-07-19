@@ -498,6 +498,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.24.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "195cdbc1741b8134346d515b3a56a1c94b0912758009cfd53f99ea0f57b065fc"
+dependencies = [
+ "bitflags",
+ "cfg-if",
+ "libc",
+ "memoffset",
+]
+
+[[package]]
 name = "ntapi"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -729,9 +741,9 @@ checksum = "eb703cfe953bccee95685111adeedb76fabe4e97549a58d16f03ea7b9367bb32"
 
 [[package]]
 name = "smallvec"
-version = "1.8.0"
+version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2dd574626839106c320a323308629dcb1acfc96e32a8cba364ddc61ac23ee83"
+checksum = "2fd0db749597d91ff862fd1d55ea87f7855a744a8425a64695b6fca237d1dad1"
 
 [[package]]
 name = "socket2"
@@ -867,14 +879,13 @@ checksum = "9c8d87e72b64a3b4db28d11ce29237c246188f4f51057d65a7eab63b7987e423"
 
 [[package]]
 name = "wayland-backend"
-version = "0.1.0-alpha9"
+version = "0.1.0-beta.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5db8f6a425604fde35b81d9ef55126bf23a29e5c9beb4f81b788ce0446d8f335"
+checksum = "0ee8e77c63b0cdc68bfc7b407b862b0fe2718949ce060b32d4f94ef1ea9607a4"
 dependencies = [
  "cc",
  "downcast-rs",
- "log",
- "nix",
+ "nix 0.24.2",
  "scoped-tls",
  "smallvec",
  "wayland-sys",
@@ -882,14 +893,14 @@ dependencies = [
 
 [[package]]
 name = "wayland-client"
-version = "0.30.0-alpha9"
+version = "0.30.0-beta.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "436dff3c6475c230e47d5018f89627a1b00bbcb49b75fdaa798a9e12084f2f5a"
+checksum = "0f9e0d862c23f07b2c4b49de66b0680948af5dd1d2def17f1ddc16520352bf14"
 dependencies = [
  "bitflags",
  "futures-channel",
- "log",
- "nix",
+ "futures-core",
+ "nix 0.24.2",
  "thiserror",
  "wayland-backend",
  "wayland-scanner",
@@ -897,9 +908,9 @@ dependencies = [
 
 [[package]]
 name = "wayland-protocols"
-version = "0.30.0-alpha9"
+version = "0.30.0-beta.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2ed069345d24b3164ac70fcc340315f5cabd2c4cde1d98557aea1fc309ea40e"
+checksum = "e47c45a60d531d5a513601f47f51a4743901836778ddae208ae9124606be1719"
 dependencies = [
  "bitflags",
  "wayland-backend",
@@ -908,10 +919,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "wayland-scanner"
-version = "0.30.0-alpha9"
+name = "wayland-protocols-wlr"
+version = "0.1.0-beta.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e235c8b924f5dc80a5c9856a1fc5418f28febb86e1a3b0dc3d23a0528766d41"
+checksum = "d0b477d16e0c1d7512f11799403c8dbb1964e756667208569ec0ea2bd1abbccb"
+dependencies = [
+ "bitflags",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-scanner",
+]
+
+[[package]]
+name = "wayland-scanner"
+version = "0.30.0-beta.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87933ccc3df4f6335cf240aca0647aa34319fdd693dda503f645ca4df4e10386"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -921,9 +945,9 @@ dependencies = [
 
 [[package]]
 name = "wayland-sys"
-version = "0.30.0-alpha9"
+version = "0.30.0-beta.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15f4896ad7999b2d0fdc2453ce2060907f604ee55b1ef91faaf9ab91d3a38dfa"
+checksum = "beca223ed017df1b356ff181d4d6e7f2b135418c4888df5bb02df7a563f02ab0"
 dependencies = [
  "dlib",
  "log",
@@ -973,6 +997,7 @@ dependencies = [
  "tokio",
  "wayland-client",
  "wayland-protocols",
+ "wayland-protocols-wlr",
  "zbus",
 ]
 
@@ -1004,7 +1029,7 @@ dependencies = [
  "futures-util",
  "hex",
  "lazy_static",
- "nix",
+ "nix 0.23.1",
  "once_cell",
  "ordered-stream",
  "rand",

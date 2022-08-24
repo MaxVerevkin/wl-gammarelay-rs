@@ -18,7 +18,7 @@ NAME               TYPE      SIGNATURE RESULT/VALUE FLAGS
 ## Installation
 
 ```sh
-cargo install wl-gammarelay-rs
+cargo install wl-gammarelay-rs --locked
 ```
 
 ## Status bar integration

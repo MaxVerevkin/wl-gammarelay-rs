@@ -25,7 +25,7 @@ cargo install wl-gammarelay-rs --locked
 
 ### i3status-rust
 
-i3status-rust hueshift block has the builtin support for this backend on the [`async` branch](https://github.com/greshake/i3status-rust/tree/async). See the documentation [here](https://greshake.github.io/i3status-rust/i3status_rs/blocks/hueshift/index.html).
+i3status-rust hueshift block has the builtin support for this backend since 0.21.6.
 
 ### Waybar
 

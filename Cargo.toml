@@ -16,7 +16,7 @@ futures = "0.3"
 wayland-client = "0.30.0-beta.8"
 wayland-protocols = { version = "0.30.0-beta.8", features = ["client"] }
 wayland-protocols-wlr = { version = "0.1.0-beta.8", features = ["client"] }
-zbus = { version = "2.1", default-features = false, features = ["tokio"] }
+zbus = { version = "3.0", default-features = false, features = ["tokio"] }
 clap = { version = "3.0", features = ["derive"] }
 
 [dependencies.tokio]
@@ -24,6 +24,6 @@ version = "1.15"
 features = ["macros", "net", "rt", "sync"]
 
 [profile.release]
-lto = "thin"
+lto = "fat"
 strip = true
 debug = 1

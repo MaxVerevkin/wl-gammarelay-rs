@@ -28,7 +28,7 @@ pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
     let mut event_queue = conn.new_event_queue();
     let mut async_fd = AsyncFd::new(event_queue.prepare_read()?.connection_fd())?;
     let qh = event_queue.handle();
-    let _registry = display.get_registry(&qh, ())?;
+    let _registry = display.get_registry(&qh, ());
 
     let mut data = AppData {
         color: Default::default(),
@@ -145,12 +145,12 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
                         color: Default::default(),
                         gamma_control: None,
                         ramp_size: 0,
-                        output: registry.bind(name, version, qh, ()).unwrap(),
+                        output: registry.bind(name, version, qh, ()),
                     });
                 }
                 "zwlr_gamma_control_manager_v1" => {
                     eprintln!("Found gamma control manager");
-                    state.manager = Some(registry.bind(name, version, qh, ()).unwrap());
+                    state.manager = Some(registry.bind(name, version, qh, ()));
                 }
                 _ => (),
             },
@@ -174,7 +174,7 @@ impl Dispatch<wl_output::WlOutput, ()> for AppData {
         if let wl_output::Event::Done = e {
             if let Some(manager) = &state.manager {
                 if let Some(output) = state.outputs.iter_mut().find(|o| &o.output == output) {
-                    let gamma = manager.get_gamma_control(&output.output, qh, ()).unwrap();
+                    let gamma = manager.get_gamma_control(&output.output, qh, ());
                     output.gamma_control = Some(gamma);
                     state.pending_updates = true;
                     eprintln!("Output {} initialized", output.name);

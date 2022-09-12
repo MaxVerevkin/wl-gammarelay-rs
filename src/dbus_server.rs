@@ -67,6 +67,35 @@ impl Server {
     }
 
     #[dbus_interface(property)]
+    async fn gamma(&self) -> f64 {
+        self.color.gamma
+    }
+
+    #[dbus_interface(property)]
+    async fn set_gamma(&mut self, gamma: f64) -> Result<(), zbus::fdo::Error> {
+        if gamma > 0.0 {
+            self.color.gamma = gamma;
+            self.send_color().await;
+            Ok(())
+        } else {
+            Err(zbus::fdo::Error::InvalidArgs(
+                "gamma must be greater than zero".into(),
+            ))
+        }
+    }
+
+    async fn update_gamma(
+        &mut self,
+        #[zbus(signal_context)] cx: zbus::SignalContext<'_>,
+        delta_gamma: f64,
+    ) -> Result<(), zbus::fdo::Error> {
+        self.color.gamma = (self.color.gamma + delta_gamma).max(0.0);
+        self.send_color().await;
+        self.gamma_changed(&cx).await?;
+        Ok(())
+    }
+
+    #[dbus_interface(property)]
     async fn brightness(&self) -> f64 {
         self.color.brightness
     }
@@ -89,7 +118,7 @@ impl Server {
         #[zbus(signal_context)] cx: zbus::SignalContext<'_>,
         delta_brightness: f64,
     ) -> Result<(), zbus::fdo::Error> {
-        self.color.brightness = (self.color.brightness + delta_brightness).clamp(0.0, 1.0) as _;
+        self.color.brightness = (self.color.brightness + delta_brightness).clamp(0.0, 1.0);
         self.send_color().await;
         self.brightness_changed(&cx).await?;
         Ok(())

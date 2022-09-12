@@ -2,6 +2,7 @@
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Color {
     pub temp: u16,
+    pub gamma: f64,
     pub brightness: f64,
     pub inverted: bool,
 }
@@ -10,10 +11,22 @@ impl Default for Color {
     fn default() -> Self {
         Self {
             temp: 6500,
+            gamma: 1.0,
             brightness: 1.0,
             inverted: false,
         }
     }
+}
+
+fn map_intensity(v: f64, white: f64, color: Color, v_max_gamma: f64) -> u16 {
+    // A gamma ramp is computed as f(x) = x^γ, for x ∈ [0,1].
+    // Multiple gamma adjustments can reasonably be combined as
+    // f(x) = x^(γ₁γ₂) = (x^γ₁)^γ₂.
+    // Here, x^γ₁ ≡ (v * white) is the color-temperature-adjusted intensity,
+    // and γ₂ is the overall gamma correction.
+    // The factor v_max_gamma adjusts for the fact that generally v ∉ [0,1]:
+    // (v/v_max)^γ * v_max = v^γ * v_max^(1-γ)
+    ((v * white).powf(color.gamma) * v_max_gamma) as u16
 }
 
 pub fn colorramp_fill(r: &mut [u16], g: &mut [u16], b: &mut [u16], ramp_size: usize, color: Color) {
@@ -24,17 +37,19 @@ pub fn colorramp_fill(r: &mut [u16], g: &mut [u16], b: &mut [u16], ramp_size: us
         &BLACKBODY_COLOR[(color_i + 3)..],
     );
 
-    let step = u16::MAX as f64 * color.brightness / (ramp_size - 1) as f64;
+    let v_max = u16::MAX as f64 * color.brightness;
+    let v_max_gamma = v_max.powf(1.0 - color.gamma);
+    let step = v_max / (ramp_size - 1) as f64;
     for i in 0..ramp_size {
         let v = step * i as f64;
         if !color.inverted {
-            r[i] = (v * white_r) as u16;
-            g[i] = (v * white_g) as u16;
-            b[i] = (v * white_b) as u16;
+            r[i] = map_intensity(v, white_r, color, v_max_gamma);
+            g[i] = map_intensity(v, white_g, color, v_max_gamma);
+            b[i] = map_intensity(v, white_b, color, v_max_gamma);
         } else {
-            r[i] = u16::MAX - (v * white_r) as u16;
-            g[i] = u16::MAX - (v * white_g) as u16;
-            b[i] = u16::MAX - (v * white_b) as u16;
+            r[ramp_size - 1 - i] = map_intensity(v, white_r, color, v_max_gamma);
+            g[ramp_size - 1 - i] = map_intensity(v, white_g, color, v_max_gamma);
+            b[ramp_size - 1 - i] = map_intensity(v, white_b, color, v_max_gamma);
         }
     }
 }

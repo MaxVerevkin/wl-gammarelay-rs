@@ -42,15 +42,10 @@ pub fn colorramp_fill(r: &mut [u16], g: &mut [u16], b: &mut [u16], ramp_size: us
     let step = v_max / (ramp_size - 1) as f64;
     for i in 0..ramp_size {
         let v = step * i as f64;
-        if !color.inverted {
-            r[i] = map_intensity(v, white_r, color, v_max_gamma);
-            g[i] = map_intensity(v, white_g, color, v_max_gamma);
-            b[i] = map_intensity(v, white_b, color, v_max_gamma);
-        } else {
-            r[ramp_size - 1 - i] = map_intensity(v, white_r, color, v_max_gamma);
-            g[ramp_size - 1 - i] = map_intensity(v, white_g, color, v_max_gamma);
-            b[ramp_size - 1 - i] = map_intensity(v, white_b, color, v_max_gamma);
-        }
+        let index = if color.inverted { ramp_size - 1 - i } else { i };
+        r[index] = map_intensity(v, white_r, color, v_max_gamma);
+        g[index] = map_intensity(v, white_g, color, v_max_gamma);
+        b[index] = map_intensity(v, white_b, color, v_max_gamma);
     }
 }
 

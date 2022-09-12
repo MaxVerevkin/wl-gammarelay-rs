@@ -9,10 +9,12 @@ $ busctl --user introspect rs.wl-gammarelay / rs.wl.gammarelay
 NAME               TYPE      SIGNATURE RESULT/VALUE FLAGS
 .ToggleInverted    method    -         -            -
 .UpdateBrightness  method    d         -            -
+.UpdateGamma       method    d         -            -
 .UpdateTemperature method    n         -            -
 .Brightness        property  d         1            emits-change writable
+.Gamma             property  d         1            emits-change writable
 .Inverted          property  b         false        emits-change writable
-.Temperature       property  q         4500         emits-change writable
+.Temperature       property  q         6500         emits-change writable
 ```
 
 ## Installation
@@ -41,6 +43,12 @@ i3status-rust hueshift block has the builtin support for this backend since 0.21
         "exec": "wl-gammarelay-rs watch {bp}",
         "on-scroll-up": "busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateBrightness d +0.02",
         "on-scroll-down": "busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateBrightness d -0.02"
+    }
+    "custom/wl-gammarelay-gamma": {
+        "format": "{}% γ",
+        "exec": "wl-gammarelay-rs watch {g}",
+        "on-scroll-up": "busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateGamma d +0.02",
+        "on-scroll-down": "busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateGamma d -0.02"
     }
 ```
 
@@ -86,4 +94,13 @@ busctl --user call rs.wl-gammarelay / rs.wl.gammarelay UpdateBrightness d 0.1
 
 # Decrease the brightness by `10%`:
 busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateBrightness d -0.1
+
+# Set display gamma to `1.0`:
+busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Gamma d 1
+
+# Increase gamma by `0.1`:
+busctl --user call rs.wl-gammarelay / rs.wl.gammarelay UpdateGamma d 0.1
+
+# Decrease gamma by `0.1`:
+busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateGamma d -0.1
 ```

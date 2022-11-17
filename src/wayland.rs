@@ -10,7 +10,7 @@ use anyhow::Result;
 
 use std::ffi::CStr;
 use std::fs::File;
-use std::os::unix::io::FromRawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd};
 
 use tokio::io::unix::AsyncFd;
 use tokio::sync::mpsc;
@@ -26,7 +26,7 @@ pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
     let conn = Connection::connect_to_env()?;
     let display = conn.display();
     let mut event_queue = conn.new_event_queue();
-    let mut async_fd = AsyncFd::new(event_queue.prepare_read()?.connection_fd())?;
+    let mut async_fd = AsyncFd::new(event_queue.prepare_read()?.connection_fd().as_raw_fd())?;
     let qh = event_queue.handle();
     let _registry = display.get_registry(&qh, ());
 
@@ -98,25 +98,24 @@ impl AppData {
     fn apply_color(&mut self) -> anyhow::Result<()> {
         self.pending_updates = false;
         for output in &mut self.outputs {
-            if let Some(gamma_control) = &output.gamma_control {
-                if output.ramp_size == 0 {
-                    self.pending_updates = true;
-                    continue;
-                }
-                if self.color != output.color {
-                    let fd = shmemfdrs::create_shmem(
-                        CStr::from_bytes_with_nul(b"/ramp-buffer\0").unwrap(),
-                        output.ramp_size * 6,
-                    );
-                    let file = unsafe { File::from_raw_fd(fd) };
-                    let mut mmap = unsafe { memmap::MmapMut::map_mut(&file)? };
-                    let buf = unsafe { bytes_to_shorts(&mut mmap) };
-                    let (r, rest) = buf.split_at_mut(output.ramp_size);
-                    let (g, b) = rest.split_at_mut(output.ramp_size);
-                    colorramp_fill(r, g, b, output.ramp_size, self.color);
-                    gamma_control.set_gamma(fd);
-                    output.color = self.color;
-                }
+            let Some(gamma_control) = &output.gamma_control else { continue };
+            if output.ramp_size == 0 {
+                self.pending_updates = true;
+                continue;
+            }
+            if self.color != output.color {
+                let fd = shmemfdrs::create_shmem(
+                    CStr::from_bytes_with_nul(b"/ramp-buffer\0").unwrap(),
+                    output.ramp_size * 6,
+                );
+                let file = unsafe { File::from_raw_fd(fd) };
+                let mut mmap = unsafe { memmap::MmapMut::map_mut(&file)? };
+                let buf = unsafe { bytes_to_shorts(&mut mmap) };
+                let (r, rest) = buf.split_at_mut(output.ramp_size);
+                let (g, b) = rest.split_at_mut(output.ramp_size);
+                colorramp_fill(r, g, b, output.ramp_size, self.color);
+                gamma_control.set_gamma(fd);
+                output.color = self.color;
             }
         }
         Ok(())
@@ -166,23 +165,34 @@ impl Dispatch<wl_output::WlOutput, ()> for AppData {
     fn event(
         state: &mut Self,
         output: &wl_output::WlOutput,
-        e: wl_output::Event,
+        event: wl_output::Event,
         _: &(),
         _conn: &Connection,
         qh: &QueueHandle<Self>,
     ) {
-        if let wl_output::Event::Done = e {
-            if let Some(manager) = &state.manager {
-                if let Some(output) = state.outputs.iter_mut().find(|o| &o.output == output) {
-                    let gamma = manager.get_gamma_control(&output.output, qh, ());
-                    output.gamma_control = Some(gamma);
-                    state.pending_updates = true;
-                    eprintln!("Output {} initialized", output.name);
-                }
-            } else {
-                eprintln!("Cannot initialize output: no gamma control manager");
-            }
+        if !matches!(event, wl_output::Event::Done) {
+            return;
         }
+
+        let Some(output) = state.outputs.iter_mut().find(|o| &o.output == output) else {
+            eprintln!("Received event for unknown output");
+            return;
+        };
+
+        if output.gamma_control.is_some() {
+            // Output already initialized
+            return;
+        }
+
+        let Some(manager) = &state.manager else {
+            eprintln!("Cannot initialize output: no gamma control manager");
+            return;
+        };
+
+        let gamma = manager.get_gamma_control(&output.output, qh, ());
+        output.gamma_control = Some(gamma);
+        state.pending_updates = true;
+        eprintln!("Output {} initialized", output.name);
     }
 }
 
@@ -205,22 +215,29 @@ impl Dispatch<gamma_control::ZwlrGammaControlV1, ()> for AppData {
         gamma_ctrl: &gamma_control::ZwlrGammaControlV1,
         event: gamma_control::Event,
         _: &(),
-        _conn: &Connection,
+        _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let gamma_control::Event::GammaSize { size } = event {
-            if let Some(output) = state
-                .outputs
-                .iter_mut()
-                .find(|o| o.gamma_control.as_ref() == Some(gamma_ctrl))
-            {
+        match event {
+            gamma_control::Event::GammaSize { size } => {
+                let Some(output) = state
+                    .outputs
+                    .iter_mut()
+                    .find(|o| o.gamma_control.as_ref() == Some(gamma_ctrl))
+                else {
+                    eprintln!("Received GammaSize for unknown output");
+                    return;
+                };
+
                 eprintln!("Output {}: ramp_size = {size}", output.name);
                 output.ramp_size = size as usize;
             }
-        } else if let gamma_control::Event::Failed = event {
-            state
-                .outputs
-                .retain(|o| o.gamma_control.as_ref() != Some(gamma_ctrl));
+            gamma_control::Event::Failed => {
+                state
+                    .outputs
+                    .retain(|o| o.gamma_control.as_ref() != Some(gamma_ctrl));
+            }
+            _ => (),
         }
     }
 }

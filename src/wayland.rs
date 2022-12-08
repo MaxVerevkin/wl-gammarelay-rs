@@ -1,10 +1,14 @@
 use wayland_client::{
+    globals::{registry_queue_init, GlobalListContents},
     protocol::{wl_output, wl_registry},
     Connection, Dispatch, QueueHandle,
 };
 use wayland_protocols_wlr::gamma_control::v1::client::{
     zwlr_gamma_control_manager_v1 as gamma_control_manager, zwlr_gamma_control_v1 as gamma_control,
 };
+
+use gamma_control::ZwlrGammaControlV1;
+use gamma_control_manager::ZwlrGammaControlManagerV1;
 
 use anyhow::Result;
 
@@ -24,20 +28,26 @@ pub enum Request {
 
 pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
     let conn = Connection::connect_to_env()?;
-    let display = conn.display();
-    let mut event_queue = conn.new_event_queue();
-    let mut async_fd = AsyncFd::new(event_queue.prepare_read()?.connection_fd().as_raw_fd())?;
+    let (globals, mut event_queue) = registry_queue_init(&conn)?;
     let qh = event_queue.handle();
-    let _registry = display.get_registry(&qh, ());
+    let mut async_fd = AsyncFd::new(event_queue.prepare_read()?.connection_fd().as_raw_fd())?;
 
-    let mut data = AppData {
+    let gamma_manager = globals.bind(&qh, 1..=1, ())?;
+
+    let outputs = globals.contents().with_list(|list| {
+        list.iter()
+            .filter(|global| global.interface == "wl_output")
+            .map(|global| Output::bind(global.name, &gamma_manager, globals.registry(), &qh))
+            .collect()
+    });
+
+    let mut state = AppData {
         color: Default::default(),
         pending_updates: false,
-        outputs: Vec::new(),
-        manager: None,
+        outputs,
+        gamma_manager,
     };
 
-    event_queue.dispatch_pending(&mut data)?;
     event_queue.flush()?;
 
     loop {
@@ -46,17 +56,17 @@ pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
                 // FIXME: use readable.try_io()
                 readable?.clear_ready();
                 event_queue.prepare_read()?.read()?;
-                event_queue.dispatch_pending(&mut data)?;
+                event_queue.dispatch_pending(&mut state)?;
                 event_queue.flush()?;
             }
             Some(request) = rx.recv() => {
                 let Request::SetColor(color) = request;
-                data.set_color(color);
+                state.set_color(color);
             }
         }
 
-        if data.pending_updates {
-            data.apply_color()?;
+        if state.pending_updates {
+            state.apply_color()?;
             event_queue.flush()?;
         }
     }
@@ -67,16 +77,40 @@ struct AppData {
     color: Color,
     pending_updates: bool,
     outputs: Vec<Output>,
-    manager: Option<gamma_control_manager::ZwlrGammaControlManagerV1>,
+    gamma_manager: ZwlrGammaControlManagerV1,
 }
 
 #[derive(Debug)]
 struct Output {
     name: u32,
     color: Color,
-    gamma_control: Option<gamma_control::ZwlrGammaControlV1>,
+    gamma_control: ZwlrGammaControlV1,
     ramp_size: usize,
-    output: wl_output::WlOutput,
+}
+
+impl Output {
+    fn bind(
+        name: u32,
+        gamma_manager: &gamma_control_manager::ZwlrGammaControlManagerV1,
+        registry: &wl_registry::WlRegistry,
+        qh: &QueueHandle<AppData>,
+    ) -> Self {
+        eprintln!("New output: {}", name);
+        let output = registry.bind(name, 1, qh, ());
+        Self {
+            name,
+            color: Default::default(),
+            gamma_control: gamma_manager.get_gamma_control(&output, qh, ()),
+            ramp_size: 0,
+        }
+    }
+}
+
+impl Drop for Output {
+    fn drop(&mut self) {
+        eprintln!("Output dropped: {}", self.name);
+        self.gamma_control.destroy();
+    }
 }
 
 /// Convert a slice of bytes to a slice of shorts (u16)
@@ -98,7 +132,6 @@ impl AppData {
     fn apply_color(&mut self) -> anyhow::Result<()> {
         self.pending_updates = false;
         for output in &mut self.outputs {
-            let Some(gamma_control) = &output.gamma_control else { continue };
             if output.ramp_size == 0 {
                 self.pending_updates = true;
                 continue;
@@ -114,7 +147,7 @@ impl AppData {
                 let (r, rest) = buf.split_at_mut(output.ramp_size);
                 let (g, b) = rest.split_at_mut(output.ramp_size);
                 colorramp_fill(r, g, b, output.ramp_size, self.color);
-                gamma_control.set_gamma(fd);
+                output.gamma_control.set_gamma(fd);
                 output.color = self.color;
             }
         }
@@ -122,37 +155,27 @@ impl AppData {
     }
 }
 
-impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
+impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for AppData {
     fn event(
         state: &mut Self,
         registry: &wl_registry::WlRegistry,
         event: wl_registry::Event,
-        _: &(),
-        _conn: &Connection,
+        _: &GlobalListContents,
+        _: &Connection,
         qh: &QueueHandle<AppData>,
     ) {
         match event {
             wl_registry::Event::Global {
                 name,
                 interface,
-                version,
-            } => match interface.as_str() {
-                "wl_output" => {
-                    eprintln!("New output: {name}");
-                    state.outputs.push(Output {
-                        name,
-                        color: Default::default(),
-                        gamma_control: None,
-                        ramp_size: 0,
-                        output: registry.bind(name, version, qh, ()),
-                    });
+                version: _,
+            } => {
+                if interface == "wl_output" {
+                    state
+                        .outputs
+                        .push(Output::bind(name, &state.gamma_manager, registry, qh));
                 }
-                "zwlr_gamma_control_manager_v1" => {
-                    eprintln!("Found gamma control manager");
-                    state.manager = Some(registry.bind(name, version, qh, ()));
-                }
-                _ => (),
-            },
+            }
             wl_registry::Event::GlobalRemove { name } => {
                 state.outputs.retain_mut(|output| output.name != name);
             }
@@ -163,36 +186,14 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
 
 impl Dispatch<wl_output::WlOutput, ()> for AppData {
     fn event(
-        state: &mut Self,
-        output: &wl_output::WlOutput,
-        event: wl_output::Event,
+        _: &mut Self,
+        _: &wl_output::WlOutput,
+        _: wl_output::Event,
         _: &(),
-        _conn: &Connection,
-        qh: &QueueHandle<Self>,
+        _: &Connection,
+        _: &QueueHandle<Self>,
     ) {
-        if !matches!(event, wl_output::Event::Done) {
-            return;
-        }
-
-        let Some(output) = state.outputs.iter_mut().find(|o| &o.output == output) else {
-            eprintln!("Received event for unknown output");
-            return;
-        };
-
-        if output.gamma_control.is_some() {
-            // Output already initialized
-            return;
-        }
-
-        let Some(manager) = &state.manager else {
-            eprintln!("Cannot initialize output: no gamma control manager");
-            return;
-        };
-
-        let gamma = manager.get_gamma_control(&output.output, qh, ());
-        output.gamma_control = Some(gamma);
-        state.pending_updates = true;
-        eprintln!("Output {} initialized", output.name);
+        // Ignore all events
     }
 }
 
@@ -220,34 +221,24 @@ impl Dispatch<gamma_control::ZwlrGammaControlV1, ()> for AppData {
     ) {
         match event {
             gamma_control::Event::GammaSize { size } => {
-                let Some(output) = state
+                let output = state
                     .outputs
                     .iter_mut()
-                    .find(|o| o.gamma_control.as_ref() == Some(gamma_ctrl))
-                else {
-                    eprintln!("Received GammaSize for unknown output");
-                    return;
-                };
-
+                    .find(|o| &o.gamma_control == gamma_ctrl)
+                    .expect("Received event for unknown output");
                 eprintln!("Output {}: ramp_size = {size}", output.name);
                 output.ramp_size = size as usize;
             }
             gamma_control::Event::Failed => {
-                state
+                let output_index = state
                     .outputs
-                    .retain(|o| o.gamma_control.as_ref() != Some(gamma_ctrl));
+                    .iter()
+                    .position(|o| &o.gamma_control == gamma_ctrl)
+                    .expect("Received event for unknown output");
+                let output = state.outputs.swap_remove(output_index);
+                eprintln!("Output {}: gamma_control::Event::Failed", output.name);
             }
             _ => (),
-        }
-    }
-}
-
-impl Drop for Output {
-    fn drop(&mut self) {
-        eprintln!("Output dropped: {}", self.name);
-        self.output.release();
-        if let Some(gamma_control) = &self.gamma_control {
-            gamma_control.destroy();
         }
     }
 }

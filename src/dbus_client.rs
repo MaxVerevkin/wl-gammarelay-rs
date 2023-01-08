@@ -32,8 +32,8 @@ fn print_formatted(format: &str, temperature: u16, gamma: f64, brightness: f64) 
         "{}",
         format
             .replace("{t}", &temperature.to_string())
-            .replace("{g}", &format!("{:.2}", gamma))
-            .replace("{b}", &format!("{:.2}", brightness))
+            .replace("{g}", &format!("{gamma:.2}"))
+            .replace("{b}", &format!("{brightness:.2}"))
             .replace("{bp}", &format!("{:.0}", brightness * 100.))
     );
 }

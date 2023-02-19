@@ -1,18 +1,12 @@
-mod gamma_protocol {
-    use wayrs_client;
-    use wayrs_client::protocol::*;
-    wayrs_scanner::generate!("wlr-gamma-control-unstable-v1.xml");
-}
-
-use gamma_protocol::*;
 use wayrs_client::protocol::*;
+use wayrs_protocols::wlr_gamma_control_unstable_v1::*;
 
 use anyhow::Result;
 
 use wayrs_client::connection::Connection;
 use wayrs_client::cstr;
 use wayrs_client::global::{Global, GlobalExt, GlobalsExt};
-use wayrs_client::proxy::{Dispatch, Dispatcher};
+use wayrs_client::proxy::Proxy;
 
 use std::fs::File;
 use std::os::unix::io::FromRawFd;
@@ -29,6 +23,7 @@ pub enum Request {
 pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
     let mut conn = Connection::connect()?;
     let globals = conn.async_collect_initial_globals().await?;
+    conn.set_callback_for(conn.registry(), wl_registry_cb);
 
     let gamma_manager = globals.bind(&mut conn, 1..=1)?;
 
@@ -38,7 +33,7 @@ pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
         .map(|output| Output::bind(&mut conn, output, gamma_manager))
         .collect();
 
-    let mut state = AppData {
+    let mut state = State {
         color: Default::default(),
         outputs,
         gamma_manager,
@@ -50,7 +45,7 @@ pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
         tokio::select! {
             recv_events = conn.async_recv_events() => {
                 recv_events?;
-                conn.dispatch_events(&mut state)?;
+                conn.dispatch_events(&mut state);
                 conn.async_flush().await?;
             }
             Some(request) = rx.recv() => {
@@ -64,7 +59,7 @@ pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
 }
 
 #[derive(Debug)]
-struct AppData {
+struct State {
     color: Color,
     outputs: Vec<Output>,
     gamma_manager: ZwlrGammaControlManagerV1,
@@ -72,7 +67,8 @@ struct AppData {
 
 #[derive(Debug)]
 struct Output {
-    name: u32,
+    reg_name: u32,
+    wl: WlOutput,
     color: Color,
     gamma_control: ZwlrGammaControlV1,
     ramp_size: usize,
@@ -80,21 +76,30 @@ struct Output {
 
 impl Output {
     fn bind(
-        conn: &mut Connection<AppData>,
+        conn: &mut Connection<State>,
         global: &Global,
         gamma_manager: ZwlrGammaControlManagerV1,
     ) -> Self {
         eprintln!("New output: {}", global.name);
-        let output = global.bind(conn, 1..=1).unwrap();
+        let output = global.bind(conn, 1..=3).unwrap();
         Self {
-            name: global.name,
+            reg_name: global.name,
+            wl: output,
             color: Default::default(),
-            gamma_control: gamma_manager.get_gamma_control(conn, output),
+            gamma_control: gamma_manager.get_gamma_control_with_cb(conn, output, gamma_control_cb),
             ramp_size: 0,
         }
     }
 
-    fn set_color(&mut self, conn: &mut Connection<AppData>, color: Color) -> Result<()> {
+    fn destroy(self, conn: &mut Connection<State>) {
+        eprintln!("Output {} removed", self.reg_name);
+        self.gamma_control.destroy(conn);
+        if self.wl.version() >= 3 {
+            self.wl.release(conn);
+        }
+    }
+
+    fn set_color(&mut self, conn: &mut Connection<State>, color: Color) -> Result<()> {
         if self.ramp_size == 0 || color == self.color {
             return Ok(());
         }
@@ -103,7 +108,7 @@ impl Output {
         let fd = shmemfdrs::create_shmem(cstr!("/ramp-buffer"), self.ramp_size * 6);
         let file = unsafe { File::from_raw_fd(fd) };
         let mut mmap = unsafe { memmap2::MmapMut::map_mut(&file)? };
-        let buf = bytes_to_shorts(&mut mmap);
+        let buf = bytemuck::cast_slice_mut::<u8, u16>(&mut mmap);
         let (r, rest) = buf.split_at_mut(self.ramp_size);
         let (g, b) = rest.split_at_mut(self.ramp_size);
         colorramp_fill(r, g, b, self.ramp_size, self.color);
@@ -112,77 +117,50 @@ impl Output {
     }
 }
 
-/// Convert a slice of bytes to a slice of shorts (u16)
-fn bytes_to_shorts<'a>(bytes: &'a mut [u8]) -> &'a mut [u16] {
-    let shorts_len = bytes.len() / 2;
-    unsafe { std::slice::from_raw_parts_mut::<'a, u16>(bytes.as_mut_ptr() as _, shorts_len) }
-}
-
-impl Dispatcher for AppData {
-    type Error = anyhow::Error;
-}
-
-impl Dispatch<WlRegistry> for AppData {
-    fn try_event(
-        &mut self,
-        conn: &mut Connection<Self>,
-        _: WlRegistry,
-        event: wl_registry::Event,
-    ) -> Result<()> {
-        match event {
-            wl_registry::Event::Global(global) if global.is::<WlOutput>() => {
-                let mut output = Output::bind(conn, &global, self.gamma_manager);
-                output.set_color(conn, self.color)?;
-                self.outputs.push(output);
-            }
-            wl_registry::Event::GlobalRemove(name) => {
-                if let Some(output_index) = self.outputs.iter().position(|o| o.name == name) {
-                    let output = self.outputs.swap_remove(output_index);
-                    output.gamma_control.destroy(conn);
-                    eprintln!("Output {} removed", output.name);
-                }
-            }
-            _ => (),
+fn wl_registry_cb(
+    conn: &mut Connection<State>,
+    state: &mut State,
+    _: WlRegistry,
+    event: wl_registry::Event,
+) {
+    match event {
+        wl_registry::Event::Global(global) if global.is::<WlOutput>() => {
+            let mut output = Output::bind(conn, &global, state.gamma_manager);
+            output.set_color(conn, state.color).unwrap();
+            state.outputs.push(output);
         }
-        Ok(())
+        wl_registry::Event::GlobalRemove(name) => {
+            if let Some(output_index) = state.outputs.iter().position(|o| o.reg_name == name) {
+                let output = state.outputs.swap_remove(output_index);
+                output.destroy(conn);
+            }
+        }
+        _ => (),
     }
 }
 
-impl Dispatch<ZwlrGammaControlV1> for AppData {
-    fn try_event(
-        &mut self,
-        conn: &mut Connection<Self>,
-        gamma_ctrl: ZwlrGammaControlV1,
-        event: zwlr_gamma_control_v1::Event,
-    ) -> Result<()> {
-        match event {
-            zwlr_gamma_control_v1::Event::GammaSize(size) => {
-                let output = self
-                    .outputs
-                    .iter_mut()
-                    .find(|o| o.gamma_control == gamma_ctrl)
-                    .expect("Received event for unknown output");
-                output.ramp_size = size as usize;
-                output.set_color(conn, self.color)?;
-                eprintln!("Output {}: ramp_size = {}", output.name, size);
-            }
-            zwlr_gamma_control_v1::Event::Failed => {
-                let output_index = self
-                    .outputs
-                    .iter()
-                    .position(|o| o.gamma_control == gamma_ctrl)
-                    .expect("Received event for unknown output");
-                let output = self.outputs.swap_remove(output_index);
-                output.gamma_control.destroy(conn);
-                eprintln!("Output {}: gamma_control::Event::Failed", output.name);
-            }
+fn gamma_control_cb(
+    conn: &mut Connection<State>,
+    state: &mut State,
+    gamma_ctrl: ZwlrGammaControlV1,
+    event: zwlr_gamma_control_v1::Event,
+) {
+    let output_index = state
+        .outputs
+        .iter()
+        .position(|o| o.gamma_control == gamma_ctrl)
+        .expect("Received event for unknown output");
+    match event {
+        zwlr_gamma_control_v1::Event::GammaSize(size) => {
+            let output = &mut state.outputs[output_index];
+            eprintln!("Output {}: ramp_size = {}", output.reg_name, size);
+            output.ramp_size = size as usize;
+            output.set_color(conn, state.color).unwrap();
         }
-        Ok(())
+        zwlr_gamma_control_v1::Event::Failed => {
+            let output = state.outputs.swap_remove(output_index);
+            eprintln!("Output {}: gamma_control::Event::Failed", output.reg_name);
+            output.destroy(conn);
+        }
     }
 }
-
-// Don't care
-impl Dispatch<WlOutput> for AppData {}
-
-// No events
-impl Dispatch<ZwlrGammaControlManagerV1> for AppData {}

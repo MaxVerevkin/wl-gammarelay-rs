@@ -11,7 +11,7 @@ struct Server {
 }
 
 pub async fn run(tx: mpsc::Sender<Request>) -> Result<bool> {
-    let _conn = match zbus::ConnectionBuilder::session()?
+    match zbus::ConnectionBuilder::session()?
         .serve_at(
             "/",
             Server {
@@ -23,10 +23,13 @@ pub async fn run(tx: mpsc::Sender<Request>) -> Result<bool> {
         .build()
         .await
     {
-        Err(zbus::Error::NameTaken) => return Ok(false),
-        other => other?,
-    };
-    Ok(true)
+        Err(zbus::Error::NameTaken) => Ok(false),
+        Err(e) => Err(e.into()),
+        Ok(server) => {
+            std::mem::forget(server);
+            Ok(true)
+        }
+    }
 }
 
 impl Server {

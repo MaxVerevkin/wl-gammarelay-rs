@@ -23,7 +23,7 @@ pub enum Request {
 pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
     let mut conn = Connection::connect()?;
     let globals = conn.async_collect_initial_globals().await?;
-    conn.set_callback_for(conn.registry(), wl_registry_cb);
+    conn.add_registry_cb(wl_registry_cb);
 
     let gamma_manager = globals.bind(&mut conn, 1..=1)?;
 
@@ -117,20 +117,15 @@ impl Output {
     }
 }
 
-fn wl_registry_cb(
-    conn: &mut Connection<State>,
-    state: &mut State,
-    _: WlRegistry,
-    event: wl_registry::Event,
-) {
+fn wl_registry_cb(conn: &mut Connection<State>, state: &mut State, event: &wl_registry::Event) {
     match event {
         wl_registry::Event::Global(global) if global.is::<WlOutput>() => {
-            let mut output = Output::bind(conn, &global, state.gamma_manager);
+            let mut output = Output::bind(conn, global, state.gamma_manager);
             output.set_color(conn, state.color).unwrap();
             state.outputs.push(output);
         }
         wl_registry::Event::GlobalRemove(name) => {
-            if let Some(output_index) = state.outputs.iter().position(|o| o.reg_name == name) {
+            if let Some(output_index) = state.outputs.iter().position(|o| o.reg_name == *name) {
                 let output = state.outputs.swap_remove(output_index);
                 output.destroy(conn);
             }

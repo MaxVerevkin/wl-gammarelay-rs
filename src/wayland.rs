@@ -157,5 +157,6 @@ fn gamma_control_cb(
             eprintln!("Output {}: gamma_control::Event::Failed", output.reg_name);
             output.destroy(conn);
         }
+        _ => (),
     }
 }

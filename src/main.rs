@@ -28,16 +28,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let commnad = Cli::parse().command.unwrap_or(Command::Run);
 
     let (tx, rx) = mpsc::channel(16);
+    let new_instance = dbus_server::run(tx).await?;
 
     match commnad {
         Command::Run => {
-            let new_instance = dbus_server::run(tx).await?;
             if new_instance {
                 wayland::run(rx).await?;
             }
         }
         Command::Watch { format } => {
-            dbus_client::watch_dbus(&format).await?;
+            if new_instance {
+                tokio::try_join!(wayland::run(rx), dbus_client::watch_dbus(&format))?;
+            } else {
+                dbus_client::watch_dbus(&format).await?;
+            }
         }
     }
 

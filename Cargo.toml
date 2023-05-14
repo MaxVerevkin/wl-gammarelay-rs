@@ -10,7 +10,7 @@ keywords = ["redshift", "gammastep", "wayland", "night-mode"]
 
 [dependencies]
 anyhow = "1.0"
-memmap2 = "0.5"
+memmap2 = "0.6"
 shmemfdrs = { version = "0.1", features = ["memfd"] }
 futures = { version = "0.3", default-features = false }
 zbus = { version = "3.5", default-features = false, features = ["tokio"] }

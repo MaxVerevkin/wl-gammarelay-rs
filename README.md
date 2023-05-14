@@ -19,6 +19,10 @@ NAME               TYPE      SIGNATURE RESULT/VALUE FLAGS
 
 ## Installation
 
+[![Packaging status](https://repology.org/badge/vertical-allrepos/wl-gammarelay-rs.svg)](https://repology.org/project/wl-gammarelay-rs/versions)
+
+### From Source
+
 ```sh
 cargo install wl-gammarelay-rs --locked
 ```

@@ -1,5 +1,3 @@
-#![allow(clippy::single_component_path_imports)]
-
 mod color;
 mod dbus_client;
 mod dbus_server;

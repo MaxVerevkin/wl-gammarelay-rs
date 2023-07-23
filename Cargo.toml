@@ -10,13 +10,13 @@ keywords = ["redshift", "gammastep", "wayland", "night-mode"]
 
 [dependencies]
 anyhow = "1.0"
-memmap2 = "0.6"
+memmap2 = "0.7"
 shmemfdrs = { version = "0.1", features = ["memfd"] }
 futures = { version = "0.3", default-features = false }
 zbus = { version = "3.5", default-features = false, features = ["tokio"] }
 clap = { version = "4.0", features = ["derive"] }
-wayrs-client = { version = "0.10", features = ["tokio"] }
-wayrs-protocols = { version = "0.10", features = ["wlr-gamma-control-unstable-v1"] }
+wayrs-client = { version = "0.11", features = ["tokio"] }
+wayrs-protocols = { version = "0.11", features = ["wlr-gamma-control-unstable-v1"] }
 bytemuck = "1.13.0"
 
 [dependencies.tokio]

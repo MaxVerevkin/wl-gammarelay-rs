@@ -3,10 +3,10 @@ use wayrs_protocols::wlr_gamma_control_unstable_v1::*;
 
 use anyhow::Result;
 
-use wayrs_client::connection::Connection;
 use wayrs_client::cstr;
-use wayrs_client::global::{Global, GlobalExt, GlobalsExt};
+use wayrs_client::global::*;
 use wayrs_client::proxy::Proxy;
+use wayrs_client::Connection;
 
 use std::fs::File;
 use std::os::unix::io::FromRawFd;
@@ -21,11 +21,10 @@ pub enum Request {
 }
 
 pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
-    let mut conn = Connection::connect()?;
-    let globals = conn.async_collect_initial_globals().await?;
+    let (mut conn, globals) = Connection::async_connect_and_collect_globals().await?;
     conn.add_registry_cb(wl_registry_cb);
 
-    let gamma_manager = globals.bind(&mut conn, 1..=1)?;
+    let gamma_manager = globals.bind(&mut conn, 1)?;
 
     let outputs = globals
         .iter()
@@ -39,20 +38,18 @@ pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
         gamma_manager,
     };
 
-    conn.async_flush().await?;
-
     loop {
+        conn.async_flush().await?;
+
         tokio::select! {
             recv_events = conn.async_recv_events() => {
                 recv_events?;
                 conn.dispatch_events(&mut state);
-                conn.async_flush().await?;
             }
             Some(request) = rx.recv() => {
                 let Request::SetColor(color) = request;
                 state.color = color;
                 state.outputs.iter_mut().try_for_each(|o| o.set_color(&mut conn, color))?;
-                conn.async_flush().await?;
             }
         }
     }

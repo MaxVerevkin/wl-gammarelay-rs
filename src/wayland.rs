@@ -1,4 +1,5 @@
 use wayrs_client::protocol::*;
+use wayrs_client::EventCtx;
 use wayrs_protocols::wlr_gamma_control_unstable_v1::*;
 
 use anyhow::Result;
@@ -131,28 +132,24 @@ fn wl_registry_cb(conn: &mut Connection<State>, state: &mut State, event: &wl_re
     }
 }
 
-fn gamma_control_cb(
-    conn: &mut Connection<State>,
-    state: &mut State,
-    gamma_ctrl: ZwlrGammaControlV1,
-    event: zwlr_gamma_control_v1::Event,
-) {
-    let output_index = state
+fn gamma_control_cb(ctx: EventCtx<State, ZwlrGammaControlV1>) {
+    let output_index = ctx
+        .state
         .outputs
         .iter()
-        .position(|o| o.gamma_control == gamma_ctrl)
+        .position(|o| o.gamma_control == ctx.proxy)
         .expect("Received event for unknown output");
-    match event {
+    match ctx.event {
         zwlr_gamma_control_v1::Event::GammaSize(size) => {
-            let output = &mut state.outputs[output_index];
+            let output = &mut ctx.state.outputs[output_index];
             eprintln!("Output {}: ramp_size = {}", output.reg_name, size);
             output.ramp_size = size as usize;
-            output.set_color(conn, state.color).unwrap();
+            output.set_color(ctx.conn, ctx.state.color).unwrap();
         }
         zwlr_gamma_control_v1::Event::Failed => {
-            let output = state.outputs.swap_remove(output_index);
+            let output = ctx.state.outputs.swap_remove(output_index);
             eprintln!("Output {}: gamma_control::Event::Failed", output.reg_name);
-            output.destroy(conn);
+            output.destroy(ctx.conn);
         }
         _ => (),
     }

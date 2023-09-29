@@ -7,8 +7,6 @@ jobs:
     name: Check
     runs-on: ubuntu-latest
     steps:
-      - name: Get required packages
-        run: sudo apt-get install libsensors-dev libssl-dev libpulse-dev libnotmuch-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions-rs/cargo@v1
@@ -19,8 +17,6 @@ jobs:
     name: Test Suite
     runs-on: ubuntu-latest
     steps:
-      - name: Get required packages
-        run: sudo apt-get install libsensors-dev libssl-dev libpulse-dev libnotmuch-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions-rs/cargo@v1
@@ -31,8 +27,6 @@ jobs:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
-      - name: Get required packages
-        run: sudo apt-get install libsensors-dev libssl-dev libpulse-dev libnotmuch-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -47,8 +41,6 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - name: Get required packages
-        run: sudo apt-get install libsensors-dev libssl-dev libpulse-dev libnotmuch-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:

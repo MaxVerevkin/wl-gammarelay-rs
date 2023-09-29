@@ -9,7 +9,7 @@ jobs:
     steps:
       - name: Get required packages
         run: sudo apt-get install libsensors-dev libssl-dev libpulse-dev libnotmuch-dev
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -25,7 +25,7 @@ jobs:
     steps:
       - name: Get required packages
         run: sudo apt-get install libsensors-dev libssl-dev libpulse-dev libnotmuch-dev
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -41,7 +41,7 @@ jobs:
     steps:
       - name: Get required packages
         run: sudo apt-get install libsensors-dev libssl-dev libpulse-dev libnotmuch-dev
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -59,7 +59,7 @@ jobs:
     steps:
       - name: Get required packages
         run: sudo apt-get install libsensors-dev libssl-dev libpulse-dev libnotmuch-dev
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal

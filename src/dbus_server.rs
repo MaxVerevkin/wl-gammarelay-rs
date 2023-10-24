@@ -8,21 +8,36 @@ use zbus::dbus_interface;
 struct Server {
     tx: mpsc::Sender<Request>,
     color: Color,
+    output_name: Option<String>,
 }
 
-pub async fn run(tx: mpsc::Sender<Request>) -> Result<bool> {
-    match zbus::ConnectionBuilder::session()?
-        .serve_at(
+pub async fn run(tx: mpsc::Sender<Request>, output_names: Vec<String>) -> Result<bool> {
+    let mut connection_builder = zbus::ConnectionBuilder::session()?;
+
+    let no_output_names = output_names.is_empty();
+    for output_name in output_names {
+        connection_builder = connection_builder.serve_at(
+            format!("/Output/{}", output_name.replace('-', "_")),
+            Server {
+                tx: tx.clone(),
+                color: Default::default(),
+                output_name: Some(output_name),
+            },
+        )?;
+    }
+
+    if no_output_names {
+        connection_builder = connection_builder.serve_at(
             "/",
             Server {
                 tx,
                 color: Default::default(),
+                output_name: None,
             },
-        )?
-        .name("rs.wl-gammarelay")?
-        .build()
-        .await
-    {
+        )?;
+    }
+
+    match connection_builder.name("rs.wl-gammarelay")?.build().await {
         Err(zbus::Error::NameTaken) => Ok(false),
         Err(e) => Err(e.into()),
         Ok(server) => {
@@ -34,7 +49,13 @@ pub async fn run(tx: mpsc::Sender<Request>) -> Result<bool> {
 
 impl Server {
     async fn send_color(&self) {
-        let _ = self.tx.send(Request::SetColor(self.color)).await;
+        let _ = self
+            .tx
+            .send(Request::SetColor {
+                color: self.color,
+                output_name: self.output_name.clone(),
+            })
+            .await;
     }
 }
 

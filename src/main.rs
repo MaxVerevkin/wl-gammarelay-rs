@@ -11,6 +11,9 @@ use tokio::sync::mpsc;
 struct Cli {
     #[clap(subcommand)]
     command: Option<Command>,
+
+    #[arg(long = "output-name", value_name = "OUTPUT_NAME")]
+    output_names: Vec<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -23,12 +26,13 @@ enum Command {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let commnad = Cli::parse().command.unwrap_or(Command::Run);
+    let cli = Cli::parse();
+    let command = cli.command.unwrap_or(Command::Run);
 
     let (tx, rx) = mpsc::channel(16);
-    let new_instance = dbus_server::run(tx).await?;
+    let new_instance = dbus_server::run(tx, cli.output_names).await?;
 
-    match commnad {
+    match command {
         Command::Run => {
             if new_instance {
                 wayland::run(rx).await?;

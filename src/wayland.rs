@@ -33,7 +33,7 @@ pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
     let outputs = globals
         .iter()
         .filter(|g| g.is::<WlOutput>())
-        .map(|output| Output::bind(&mut conn, output, gamma_manager, None))
+        .map(|output| Output::bind(&mut conn, output, gamma_manager))
         .collect();
 
     let mut state = State {
@@ -91,14 +91,13 @@ impl Output {
         conn: &mut Connection<State>,
         global: &Global,
         gamma_manager: ZwlrGammaControlManagerV1,
-        name: Option<String>,
     ) -> Self {
         eprintln!("New output: {}", global.name);
         let output = global.bind_with_cb(conn, 4, wl_output_cb).unwrap();
         Self {
             reg_name: global.name,
             wl: output,
-            name,
+            name: None,
             color: Default::default(),
             gamma_control: gamma_manager.get_gamma_control_with_cb(conn, output, gamma_control_cb),
             ramp_size: 0,
@@ -134,7 +133,7 @@ impl Output {
 fn wl_registry_cb(conn: &mut Connection<State>, state: &mut State, event: &wl_registry::Event) {
     match event {
         wl_registry::Event::Global(global) if global.is::<WlOutput>() => {
-            let mut output = Output::bind(conn, global, state.gamma_manager, None);
+            let mut output = Output::bind(conn, global, state.gamma_manager);
             output.set_color(conn, state.color).unwrap();
             state.outputs.push(output);
         }
@@ -172,20 +171,17 @@ fn gamma_control_cb(ctx: EventCtx<State, ZwlrGammaControlV1>) {
 }
 
 fn wl_output_cb(ctx: EventCtx<State, WlOutput>) {
-    match ctx.event {
-        wl_output::Event::Name(name) => {
-            let i = ctx
-                .state
-                .outputs
-                .iter()
-                .position(|o| o.wl == ctx.proxy)
-                .unwrap();
-            let mut output = ctx.state.outputs.swap_remove(i);
-            let name = String::from_utf8(name.into_bytes()).expect("invalid output name");
-            eprintln!("Output {}: name = {name:?}", output.reg_name);
-            output.name = Some(name);
-            ctx.state.outputs.push(output);
-        }
-        _ => (),
+    if let wl_output::Event::Name(name) = ctx.event {
+        let i = ctx
+            .state
+            .outputs
+            .iter()
+            .position(|o| o.wl == ctx.proxy)
+            .unwrap();
+        let mut output = ctx.state.outputs.swap_remove(i);
+        let name = String::from_utf8(name.into_bytes()).expect("invalid output name");
+        eprintln!("Output {}: name = {name:?}", output.reg_name);
+        output.name = Some(name);
+        ctx.state.outputs.push(output);
     }
 }

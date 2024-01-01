@@ -58,7 +58,7 @@ pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
                     .iter_mut()
                     .filter(|o|
                          if let Some(output_name) = &output_name {
-                            o.name.as_ref().unwrap() == output_name
+                            o.name.as_ref() == Some(output_name)
                         } else {
                             true
                         }
@@ -172,16 +172,14 @@ fn gamma_control_cb(ctx: EventCtx<State, ZwlrGammaControlV1>) {
 
 fn wl_output_cb(ctx: EventCtx<State, WlOutput>) {
     if let wl_output::Event::Name(name) = ctx.event {
-        let i = ctx
+        let output = ctx
             .state
             .outputs
-            .iter()
-            .position(|o| o.wl == ctx.proxy)
+            .iter_mut()
+            .find(|o| o.wl == ctx.proxy)
             .unwrap();
-        let mut output = ctx.state.outputs.swap_remove(i);
         let name = String::from_utf8(name.into_bytes()).expect("invalid output name");
         eprintln!("Output {}: name = {name:?}", output.reg_name);
         output.name = Some(name);
-        ctx.state.outputs.push(output);
     }
 }

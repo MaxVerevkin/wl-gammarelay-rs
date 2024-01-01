@@ -17,7 +17,7 @@ pub async fn run(tx: mpsc::Sender<Request>, output_names: Vec<String>) -> Result
     let no_output_names = output_names.is_empty();
     for output_name in output_names {
         connection_builder = connection_builder.serve_at(
-            format!("/Output/{}", output_name.replace('-', "_")),
+            format!("/outputs/{}", output_name.replace('-', "_")),
             Server {
                 tx: tx.clone(),
                 color: Default::default(),

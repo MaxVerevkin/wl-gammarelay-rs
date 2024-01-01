@@ -2,48 +2,24 @@ use crate::color::Color;
 use crate::wayland::Request;
 use anyhow::Result;
 use tokio::sync::mpsc;
-use zbus::dbus_interface;
+use zbus::{dbus_interface, Connection};
 
 #[derive(Debug)]
-struct Server {
+pub struct Server {
     tx: mpsc::Sender<Request>,
     color: Color,
     output_name: Option<String>,
 }
 
-pub async fn run(tx: mpsc::Sender<Request>, output_names: Vec<String>) -> Result<bool> {
-    let mut connection_builder = zbus::ConnectionBuilder::session()?;
-
-    let no_output_names = output_names.is_empty();
-    for output_name in output_names {
-        connection_builder = connection_builder.serve_at(
-            format!("/outputs/{}", output_name.replace('-', "_")),
-            Server {
-                tx: tx.clone(),
-                color: Default::default(),
-                output_name: Some(output_name),
-            },
-        )?;
-    }
-
-    if no_output_names {
-        connection_builder = connection_builder.serve_at(
-            "/",
-            Server {
-                tx,
-                color: Default::default(),
-                output_name: None,
-            },
-        )?;
-    }
-
-    match connection_builder.name("rs.wl-gammarelay")?.build().await {
-        Err(zbus::Error::NameTaken) => Ok(false),
+pub async fn run(tx: mpsc::Sender<Request>) -> Result<Option<Connection>> {
+    let mut builder = zbus::ConnectionBuilder::session()?;
+    builder = builder.serve_at("/", new_server(tx, None))?;
+    builder = builder.name("rs.wl-gammarelay")?;
+    let session = builder.build().await;
+    match session {
+        Err(zbus::Error::NameTaken) => Ok(None),
         Err(e) => Err(e.into()),
-        Ok(server) => {
-            std::mem::forget(server);
-            Ok(true)
-        }
+        Ok(server) => Ok(Some(server)),
     }
 }
 
@@ -56,6 +32,14 @@ impl Server {
                 output_name: self.output_name.clone(),
             })
             .await;
+    }
+}
+
+pub fn new_server(tx: mpsc::Sender<Request>, output_name: Option<String>) -> Server {
+    Server {
+        tx,
+        output_name,
+        color: Default::default(),
     }
 }
 

@@ -15,6 +15,7 @@ use std::os::unix::io::FromRawFd;
 use tokio::sync::mpsc;
 
 use crate::color::{colorramp_fill, Color};
+use crate::dbus_server::new_server;
 
 #[derive(Debug)]
 pub enum Request {
@@ -24,7 +25,11 @@ pub enum Request {
     },
 }
 
-pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
+pub async fn run(
+    mut rx: mpsc::Receiver<Request>,
+    tx: mpsc::Sender<Request>,
+    instance: zbus::Connection,
+) -> Result<()> {
     let (mut conn, globals) = Connection::async_connect_and_collect_globals().await?;
     conn.add_registry_cb(wl_registry_cb);
 
@@ -36,10 +41,13 @@ pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
         .map(|output| Output::bind(&mut conn, output, gamma_manager))
         .collect();
 
+    let (tx_output_names, mut rx_output_names) = mpsc::unbounded_channel();
+
     let mut state = State {
         color: Default::default(),
         outputs,
         gamma_manager,
+        tx_output_names,
     };
 
     loop {
@@ -51,19 +59,22 @@ pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
                 conn.dispatch_events(&mut state);
             }
             Some(request) = rx.recv() => {
-                let Request::SetColor {color, output_name} = request;
+                let Request::SetColor { color, output_name } = request;
                 state.color = color;
                 state
                     .outputs
                     .iter_mut()
-                    .filter(|o|
-                         if let Some(output_name) = &output_name {
-                            o.name.as_ref() == Some(output_name)
-                        } else {
-                            true
-                        }
-                    )
+                    .filter(|o| output_name.is_none() || o.name.as_ref() == output_name.as_ref())
                     .try_for_each(|o| o.set_color(&mut conn, color))?;
+            }
+            Some(output_name) = rx_output_names.recv() => {
+                instance
+                    .object_server()
+                    .at(
+                        format!("/outputs/{}", output_name.replace('-', "_")),
+                        new_server(tx.clone(), Some(output_name)),
+                    )
+                    .await?;
             }
         }
     }
@@ -74,6 +85,7 @@ struct State {
     color: Color,
     outputs: Vec<Output>,
     gamma_manager: ZwlrGammaControlManagerV1,
+    tx_output_names: mpsc::UnboundedSender<String>,
 }
 
 #[derive(Debug)]
@@ -180,6 +192,7 @@ fn wl_output_cb(ctx: EventCtx<State, WlOutput>) {
             .unwrap();
         let name = String::from_utf8(name.into_bytes()).expect("invalid output name");
         eprintln!("Output {}: name = {name:?}", output.reg_name);
+        ctx.state.tx_output_names.send(name.clone()).unwrap();
         output.name = Some(name);
     }
 }

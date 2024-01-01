@@ -196,6 +196,28 @@ impl RootServer {
 
         Ok(())
     }
+
+    pub async fn remove_output(
+        &self,
+        instance: &mut Connection,
+        output_name: String,
+    ) -> Result<()> {
+        let mut outputs = self.outputs.lock().await;
+        let mut output_index = None;
+        for (index, output) in outputs.iter().enumerate() {
+            if output.lock().await.output_name == output_name {
+                output_index = Some(index);
+                break;
+            }
+        }
+        if let Some(index) = output_index {
+            outputs.remove(index);
+            let path = format!("/outputs/{}", output_name.replace('-', "_"));
+            instance.object_server().remove::<Server, _>(path).await?;
+        }
+
+        Ok(())
+    }
 }
 
 #[dbus_interface(name = "rs.wl.gammarelay")]

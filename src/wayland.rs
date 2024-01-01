@@ -44,6 +44,7 @@ pub async fn run(
         outputs,
         gamma_manager,
         new_output_names: Vec::new(),
+        output_names_to_delete: Vec::new(),
     };
 
     loop {
@@ -53,10 +54,11 @@ pub async fn run(
             recv_events = conn.async_recv_events() => {
                 recv_events?;
                 conn.dispatch_events(&mut state);
-                if !state.new_output_names.is_empty() {
-                    while let Some(output_name) = state.new_output_names.pop() {
-                        root_server.add_output(&mut instance, tx.clone(), output_name).await?;
-                    }
+                while let Some(output_name) = state.new_output_names.pop() {
+                    root_server.add_output(&mut instance, tx.clone(), output_name).await?;
+                }
+                while let Some(output_name) = state.output_names_to_delete.pop() {
+                    root_server.remove_output(&mut instance, output_name).await?;
                 }
             }
             Some(request) = rx.recv() => {
@@ -78,6 +80,7 @@ struct State {
     outputs: Vec<Output>,
     gamma_manager: ZwlrGammaControlManagerV1,
     new_output_names: Vec<String>,
+    output_names_to_delete: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -144,6 +147,9 @@ fn wl_registry_cb(conn: &mut Connection<State>, state: &mut State, event: &wl_re
         wl_registry::Event::GlobalRemove(name) => {
             if let Some(output_index) = state.outputs.iter().position(|o| o.reg_name == *name) {
                 let output = state.outputs.swap_remove(output_index);
+                state
+                    .output_names_to_delete
+                    .push(output.name.clone().unwrap());
                 output.destroy(conn);
             }
         }

@@ -27,18 +27,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let command = cli.command.unwrap_or(Command::Run);
 
     let (tx, rx) = mpsc::channel(16);
-    let new_instance = dbus_server::run(tx.clone()).await?;
+    let new_instance = dbus_server::run().await?;
 
     match command {
         Command::Run => {
-            if let Some(instance) = new_instance {
-                wayland::run(rx, tx.clone(), instance).await?;
+            if let Some((instance, root_server)) = new_instance {
+                wayland::run(rx, tx.clone(), instance, root_server).await?;
             }
         }
         Command::Watch { format } => {
-            if let Some(instance) = new_instance {
+            if let Some((instance, root_server)) = new_instance {
                 tokio::try_join!(
-                    wayland::run(rx, tx.clone(), instance),
+                    wayland::run(rx, tx.clone(), instance, root_server),
                     dbus_client::watch_dbus(&format)
                 )?;
             } else {

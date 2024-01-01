@@ -15,20 +15,18 @@ use std::os::unix::io::FromRawFd;
 use tokio::sync::mpsc;
 
 use crate::color::{colorramp_fill, Color};
-use crate::dbus_server::new_server;
+use crate::dbus_server::RootServer;
 
 #[derive(Debug)]
 pub enum Request {
-    SetColor {
-        color: Color,
-        output_name: Option<String>,
-    },
+    SetColor { color: Color, output_name: String },
 }
 
 pub async fn run(
     mut rx: mpsc::Receiver<Request>,
     tx: mpsc::Sender<Request>,
-    instance: zbus::Connection,
+    mut instance: zbus::Connection,
+    root_server: RootServer,
 ) -> Result<()> {
     let (mut conn, globals) = Connection::async_connect_and_collect_globals().await?;
     conn.add_registry_cb(wl_registry_cb);
@@ -57,13 +55,7 @@ pub async fn run(
                 conn.dispatch_events(&mut state);
                 if !state.new_output_names.is_empty() {
                     while let Some(output_name) = state.new_output_names.pop() {
-                        instance
-                            .object_server()
-                            .at(
-                                format!("/outputs/{}", output_name.replace('-', "_")),
-                                new_server(tx.clone(), Some(output_name)),
-                            )
-                            .await?;
+                        root_server.add_output(&mut instance, tx.clone(), output_name).await?;
                     }
                 }
             }
@@ -73,7 +65,7 @@ pub async fn run(
                 state
                     .outputs
                     .iter_mut()
-                    .filter(|o| output_name.is_none() || o.name.as_ref() == output_name.as_ref())
+                    .filter(|o| o.name.as_ref() == Some(&output_name))
                     .try_for_each(|o| o.set_color(&mut conn, color))?;
             }
         }

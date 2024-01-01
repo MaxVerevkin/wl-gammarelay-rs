@@ -41,13 +41,11 @@ pub async fn run(
         .map(|output| Output::bind(&mut conn, output, gamma_manager))
         .collect();
 
-    let (tx_output_names, mut rx_output_names) = mpsc::unbounded_channel();
-
     let mut state = State {
         color: Default::default(),
         outputs,
         gamma_manager,
-        tx_output_names,
+        new_output_names: Vec::new(),
     };
 
     loop {
@@ -57,6 +55,17 @@ pub async fn run(
             recv_events = conn.async_recv_events() => {
                 recv_events?;
                 conn.dispatch_events(&mut state);
+                if !state.new_output_names.is_empty() {
+                    while let Some(output_name) = state.new_output_names.pop() {
+                        instance
+                            .object_server()
+                            .at(
+                                format!("/outputs/{}", output_name.replace('-', "_")),
+                                new_server(tx.clone(), Some(output_name)),
+                            )
+                            .await?;
+                    }
+                }
             }
             Some(request) = rx.recv() => {
                 let Request::SetColor { color, output_name } = request;
@@ -67,15 +76,6 @@ pub async fn run(
                     .filter(|o| output_name.is_none() || o.name.as_ref() == output_name.as_ref())
                     .try_for_each(|o| o.set_color(&mut conn, color))?;
             }
-            Some(output_name) = rx_output_names.recv() => {
-                instance
-                    .object_server()
-                    .at(
-                        format!("/outputs/{}", output_name.replace('-', "_")),
-                        new_server(tx.clone(), Some(output_name)),
-                    )
-                    .await?;
-            }
         }
     }
 }
@@ -85,7 +85,7 @@ struct State {
     color: Color,
     outputs: Vec<Output>,
     gamma_manager: ZwlrGammaControlManagerV1,
-    tx_output_names: mpsc::UnboundedSender<String>,
+    new_output_names: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -192,7 +192,7 @@ fn wl_output_cb(ctx: EventCtx<State, WlOutput>) {
             .unwrap();
         let name = String::from_utf8(name.into_bytes()).expect("invalid output name");
         eprintln!("Output {}: name = {name:?}", output.reg_name);
-        ctx.state.tx_output_names.send(name.clone()).unwrap();
+        ctx.state.new_output_names.push(name.clone());
         output.name = Some(name);
     }
 }

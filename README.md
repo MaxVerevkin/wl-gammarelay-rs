@@ -58,6 +58,10 @@ i3status-rust hueshift block has the builtin support for this backend since 0.21
 
 Note: make sure `wl-gammarelay-rs` is in your `PATH` at the time `waybar` is launched, or use the full path to the binary.
 
+### wl-gammarelay-applet
+
+[wl-gammarelay-applet](https://github.com/junelva/wl-gammarelay-applet) is a small desktop applet for controlling wl-gammarelay-rs.
+
 ## Watch for changes
 
 You can run `wl-gammarelay-rs watch <format>` to watch for changes. Each time some property changes, a new line will be printed based on <format> string. `{t}` expands into temperature, `{b}` into brightness (0 to 1) and `{bp}` expands into brightness in percents (0 to 100).

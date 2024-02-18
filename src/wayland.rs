@@ -1,5 +1,5 @@
 use wayrs_client::protocol::*;
-use wayrs_client::EventCtx;
+use wayrs_client::{EventCtx, IoMode};
 use wayrs_protocols::wlr_gamma_control_unstable_v1::*;
 
 use anyhow::Result;
@@ -10,61 +10,69 @@ use wayrs_client::proxy::Proxy;
 use wayrs_client::Connection;
 
 use std::fs::File;
-use std::os::unix::io::FromRawFd;
-
-use tokio::sync::mpsc;
+use std::io::ErrorKind;
+use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 
 use crate::color::{colorramp_fill, Color};
+use crate::State;
 
-#[derive(Debug)]
-pub enum Request {
-    SetColor(Color),
+pub struct Wayland {
+    conn: Connection<State>,
 }
 
-pub async fn run(mut rx: mpsc::Receiver<Request>) -> Result<()> {
-    let (mut conn, globals) = Connection::async_connect_and_collect_globals().await?;
-    conn.add_registry_cb(wl_registry_cb);
+impl AsRawFd for Wayland {
+    fn as_raw_fd(&self) -> RawFd {
+        self.conn.as_raw_fd()
+    }
+}
 
-    let gamma_manager = globals.bind(&mut conn, 1)?;
+impl Wayland {
+    pub fn new() -> Result<(Self, State)> {
+        let (mut conn, globals) = Connection::connect_and_collect_globals()?;
+        conn.add_registry_cb(wl_registry_cb);
 
-    let outputs = globals
-        .iter()
-        .filter(|g| g.is::<WlOutput>())
-        .map(|output| Output::bind(&mut conn, output, gamma_manager))
-        .collect();
+        let gamma_manager = globals.bind(&mut conn, 1)?;
 
-    let mut state = State {
-        color: Default::default(),
-        outputs,
-        gamma_manager,
-    };
+        let outputs = globals
+            .iter()
+            .filter(|g| g.is::<WlOutput>())
+            .map(|output| Output::bind(&mut conn, output, gamma_manager))
+            .collect();
 
-    loop {
-        conn.async_flush().await?;
+        let state = State {
+            color: Default::default(),
+            color_changed: false,
+            outputs,
+            gamma_manager,
+        };
 
-        tokio::select! {
-            recv_events = conn.async_recv_events() => {
-                recv_events?;
-                conn.dispatch_events(&mut state);
-            }
-            Some(request) = rx.recv() => {
-                let Request::SetColor(color) = request;
-                state.color = color;
-                state.outputs.iter_mut().try_for_each(|o| o.set_color(&mut conn, color))?;
-            }
+        conn.flush(IoMode::Blocking)?;
+
+        Ok((Self { conn }, state))
+    }
+
+    pub fn poll(&mut self, state: &mut State) -> Result<()> {
+        match self.conn.recv_events(IoMode::NonBlocking) {
+            Ok(()) => self.conn.dispatch_events(state),
+            Err(e) if e.kind() == ErrorKind::WouldBlock => (),
+            Err(e) => return Err(e.into()),
         }
+
+        if state.color_changed {
+            state.color_changed = false;
+            state
+                .outputs
+                .iter_mut()
+                .try_for_each(|o| o.set_color(&mut self.conn, state.color))?;
+        }
+
+        self.conn.flush(IoMode::Blocking)?;
+        Ok(())
     }
 }
 
 #[derive(Debug)]
-struct State {
-    color: Color,
-    outputs: Vec<Output>,
-    gamma_manager: ZwlrGammaControlManagerV1,
-}
-
-#[derive(Debug)]
-struct Output {
+pub struct Output {
     reg_name: u32,
     wl: WlOutput,
     color: Color,

@@ -1,73 +1,141 @@
-use anyhow::Result;
-use futures::stream::StreamExt;
-use zbus::dbus_proxy;
+use std::{
+    collections::HashMap,
+    os::fd::{AsRawFd, RawFd},
+};
 
-pub async fn watch_dbus(format: &str) -> Result<()> {
-    let conn = zbus::ConnectionBuilder::session()?.build().await?;
-    let proxy = BusInterfaceProxy::new(&conn).await?;
-    let mut temperature = proxy.temperature().await?;
-    let mut gamma = proxy.gamma().await?;
-    let mut brightness = proxy.brightness().await?;
-    let mut t_stream = proxy.receive_temperature_changed().await;
-    let mut g_stream = proxy.receive_gamma_changed().await;
-    let mut b_stream = proxy.receive_brightness_changed().await;
-    loop {
-        print_formatted(format, temperature, gamma, brightness);
-        tokio::select! {
-            Some(t) = t_stream.next() => {
-                temperature = t.get().await?;
-            }
-            Some(g) = g_stream.next() => {
-                gamma = g.get().await?;
-            }
-            Some(b) = b_stream.next() => {
-                brightness = b.get().await?;
-            }
-        }
+use anyhow::Result;
+use rustbus_service::rustbus::{
+    self, connection::Timeout, get_session_bus_path, standard_messages,
+    wire::unmarshal::traits::Variant as UnVariant, DuplexConn, MessageBuilder, MessageType,
+};
+
+pub struct DbusClient {
+    format: String,
+    conn: DuplexConn,
+    temperature: u16,
+    gamma: f64,
+    brightness: f64,
+}
+
+impl AsRawFd for DbusClient {
+    fn as_raw_fd(&self) -> RawFd {
+        self.conn.as_raw_fd()
     }
 }
 
-fn print_formatted(format: &str, temperature: u16, gamma: f64, brightness: f64) {
-    println!(
-        "{}",
-        format
-            .replace("{t}", &temperature.to_string())
-            .replace("{g}", &format!("{gamma:.2}"))
-            .replace("{b}", &format!("{brightness:.2}"))
-            .replace("{bp}", &format!("{:.0}", brightness * 100.))
-    );
-}
+impl DbusClient {
+    pub fn new(format: String, server_running: bool) -> Result<Self> {
+        let mut conn = DuplexConn::connect_to_bus(get_session_bus_path()?, true)?;
+        conn.send_hello(Timeout::Infinite)?;
 
-#[dbus_proxy(
-    interface = "rs.wl.gammarelay",
-    default_service = "rs.wl-gammarelay",
-    default_path = "/"
-)]
-trait BusInterface {
-    /// UpdateBrightness method
-    fn update_brightness(&self, delta_brightness: f64) -> zbus::Result<()>;
+        conn.send
+            .send_message_write_all(&standard_messages::add_match(
+                "type='signal',sender='rs.wl-gammarelay',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged'",
+            ))?;
 
-    /// UpdateGamma method
-    fn update_gamma(&self, delta_gamma: f64) -> zbus::Result<()>;
+        let mut temperature = 6500;
+        let mut gamma = 1.0;
+        let mut brightness = 1.0;
 
-    /// UpdateTemperature method
-    fn update_temperature(&self, delta_temp: i16) -> zbus::Result<()>;
+        if server_running {
+            let mut t_done = false;
+            let mut g_done = false;
+            let mut b_done = false;
+            let mut msg = MessageBuilder::new()
+                .call("Get")
+                .on("/")
+                .with_interface("org.freedesktop.DBus.Properties")
+                .at("rs.wl-gammarelay")
+                .build();
 
-    /// Brightness property
-    #[dbus_proxy(property)]
-    fn brightness(&self) -> zbus::Result<f64>;
-    #[dbus_proxy(property)]
-    fn set_brightness(&self, value: f64) -> zbus::Result<()>;
+            msg.body.reset();
+            msg.body.push_param("rs.wl.gammarelay")?;
+            msg.body.push_param("Temperature")?;
+            let t_serial = conn.send.send_message_write_all(&msg)?;
+            msg.body.reset();
+            msg.body.push_param("rs.wl.gammarelay")?;
+            msg.body.push_param("Gamma")?;
+            let g_serial = conn.send.send_message_write_all(&msg)?;
+            msg.body.reset();
+            msg.body.push_param("rs.wl.gammarelay")?;
+            msg.body.push_param("Brightness")?;
+            let b_serial = conn.send.send_message_write_all(&msg)?;
 
-    /// Gamma property
-    #[dbus_proxy(property)]
-    fn gamma(&self) -> zbus::Result<f64>;
-    #[dbus_proxy(property)]
-    fn set_gamma(&self, value: f64) -> zbus::Result<()>;
+            while !(t_done && g_done && b_done) {
+                let msg = conn.recv.get_next_message(Timeout::Infinite)?;
+                let mut parser = msg.body.parser();
+                if msg.dynheader.response_serial == Some(t_serial) {
+                    temperature = parser.get::<UnVariant>()?.get::<u16>()?;
+                    t_done = true;
+                } else if msg.dynheader.response_serial == Some(g_serial) {
+                    gamma = parser.get::<UnVariant>()?.get::<f64>()?;
+                    g_done = true;
+                } else if msg.dynheader.response_serial == Some(b_serial) {
+                    brightness = parser.get::<UnVariant>()?.get::<f64>()?;
+                    b_done = true;
+                }
+            }
+        }
 
-    /// Temperature property
-    #[dbus_proxy(property)]
-    fn temperature(&self) -> zbus::Result<u16>;
-    #[dbus_proxy(property)]
-    fn set_temperature(&self, value: u16) -> zbus::Result<()>;
+        let this = Self {
+            format,
+            conn,
+            temperature,
+            gamma,
+            brightness,
+        };
+
+        this.print();
+
+        Ok(this)
+    }
+
+    pub fn run(&mut self, blocking: bool) -> Result<()> {
+        let timeout = if blocking {
+            Timeout::Infinite
+        } else {
+            Timeout::Nonblock
+        };
+        loop {
+            let msg = match self.conn.recv.get_next_message(timeout) {
+                Ok(msg) => msg,
+                Err(rustbus::connection::Error::TimedOut) => return Ok(()),
+                Err(e) => return Err(e.into()),
+            };
+
+            if msg.typ == MessageType::Signal
+                && msg.dynheader.interface.as_deref() == Some("org.freedesktop.DBus.Properties")
+                && msg.dynheader.member.as_deref() == Some("PropertiesChanged")
+            {
+                let mut parser = msg.body.parser();
+                let iface = parser.get::<&str>()?;
+                if iface == "rs.wl.gammarelay" {
+                    let changed = parser.get::<HashMap<&str, UnVariant>>()?;
+                    let invalidated = parser.get::<Vec<&str>>()?;
+                    assert!(invalidated.is_empty());
+                    if let Some(v) = changed.get("Temperature") {
+                        self.temperature = v.get::<u16>()?;
+                    }
+                    if let Some(v) = changed.get("Gamma") {
+                        self.gamma = v.get::<f64>()?;
+                    }
+                    if let Some(v) = changed.get("Brightness") {
+                        self.brightness = v.get::<f64>()?;
+                    }
+                    self.print();
+                }
+            }
+        }
+    }
+
+    fn print(&self) {
+        println!(
+            "{}",
+            self.format
+                .replace("{t}", &self.temperature.to_string())
+                .replace("{g}", &format!("{:.2}", self.gamma))
+                .replace("{b}", &format!("{:.2}", self.brightness))
+                .replace("{bp}", &format!("{:.0}", self.brightness * 100.))
+        );
+    }
 }

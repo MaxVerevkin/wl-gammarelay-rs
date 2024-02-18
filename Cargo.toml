@@ -10,18 +10,14 @@ keywords = ["redshift", "gammastep", "wayland", "night-mode"]
 
 [dependencies]
 anyhow = "1.0"
-memmap2 = "0.8"
-shmemfdrs = { version = "0.1", features = ["memfd"] }
-futures = { version = "0.3", default-features = false }
-zbus = { version = "3.5", default-features = false, features = ["tokio"] }
+bytemuck = "1.13"
 clap = { version = "4.0", features = ["derive"] }
-wayrs-client = { version = "0.12", features = ["tokio"] }
-wayrs-protocols = { version = "0.12", features = ["wlr-gamma-control-unstable-v1"] }
-bytemuck = "1.13.0"
-
-[dependencies.tokio]
-version = "1.21"
-features = ["macros", "net", "rt", "sync"]
+libc = "0.2"
+memmap2 = "0.9"
+rustbus-service = { git = "https://github.com/MaxVerevkin/rustbus-service", rev = "0c72f36" }
+shmemfdrs = { version = "0.1", features = ["memfd"] }
+wayrs-client = "1.0"
+wayrs-protocols = { version = "0.13", features = ["wlr-gamma-control-unstable-v1"] }
 
 [profile.release]
 lto = "fat"

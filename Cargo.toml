@@ -14,10 +14,18 @@ bytemuck = "1.13"
 clap = { version = "4.0", default-features = false, features = ["std", "help", "usage", "derive"] }
 libc = "0.2"
 memmap2 = "0.9"
-rustbus-service = { git = "https://github.com/MaxVerevkin/rustbus-service", rev = "0c72f36" }
+rustbus-service = { git = "https://github.com/MaxVerevkin/rustbus-service", rev = "cffa791" }
 shmemfdrs = { version = "0.1", features = ["memfd"] }
 wayrs-client = "1.0"
 wayrs-protocols = { version = "0.13", features = ["wlr-gamma-control-unstable-v1"] }
+
+# [patch.'https://github.com/KillingSpark/rustbus']
+# rustbus = { path = "../rustbus/rustbus" }
+# [patch.'https://github.com/MaxVerevkin/rustbus-service']
+# rustbus-service = { path = "../rustbus-service" }
+# [patch.crates-io]
+# wayrs-client = { path = "../wayrs/wayrs-client" }
+# wayrs-protocols = { path = "../wayrs/wayrs-protocols" }
 
 [profile.release]
 lto = "fat"

@@ -39,6 +39,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "cfg_aliases"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
+
+[[package]]
 name = "clap"
 version = "4.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -96,9 +102,9 @@ checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
 
 [[package]]
 name = "indexmap"
-version = "2.2.3"
+version = "2.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "233cf39063f058ea2caae4091bf4a3ef70a653afbc026f5c4a4135d114e3c177"
+checksum = "7b0b929d511467233429c45a44ac1dcaa21ba0f5ba11e4879e6ed28ddb4f9df4"
 dependencies = [
  "equivalent",
  "hashbrown",
@@ -136,12 +142,13 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.27.1"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
+checksum = "ab2156c4fce2f8df6c499cc1c763e4394b7482525bf2a9701c9d79d215f519e4"
 dependencies = [
  "bitflags",
  "cfg-if",
+ "cfg_aliases",
  "libc",
  "memoffset",
 ]
@@ -185,7 +192,7 @@ dependencies = [
 [[package]]
 name = "rustbus"
 version = "0.19.3"
-source = "git+https://github.com/KillingSpark/rustbus?rev=f5581eb#f5581eb4215d9de0aca85928480611551b276be4"
+source = "git+https://github.com/KillingSpark/rustbus?rev=bf87291#bf872910143397c6dd3185dd989fbf606ded3a40"
 dependencies = [
  "nix",
  "rustbus_derive",
@@ -195,7 +202,7 @@ dependencies = [
 [[package]]
 name = "rustbus-service"
 version = "0.1.0"
-source = "git+https://github.com/MaxVerevkin/rustbus-service?rev=0c72f36#0c72f36a64841cdcf065246f5a19086d9052bf06"
+source = "git+https://github.com/MaxVerevkin/rustbus-service?rev=cffa791#cffa79167032ce5b5b23097d5be87603e958f8f9"
 dependencies = [
  "rustbus",
  "rustbus-service-macros",
@@ -204,7 +211,7 @@ dependencies = [
 [[package]]
 name = "rustbus-service-macros"
 version = "0.1.0"
-source = "git+https://github.com/MaxVerevkin/rustbus-service?rev=0c72f36#0c72f36a64841cdcf065246f5a19086d9052bf06"
+source = "git+https://github.com/MaxVerevkin/rustbus-service?rev=cffa791#cffa79167032ce5b5b23097d5be87603e958f8f9"
 dependencies = [
  "proc-macro-crate",
  "quote",
@@ -214,7 +221,7 @@ dependencies = [
 [[package]]
 name = "rustbus_derive"
 version = "0.5.0"
-source = "git+https://github.com/KillingSpark/rustbus?rev=f5581eb#f5581eb4215d9de0aca85928480611551b276be4"
+source = "git+https://github.com/KillingSpark/rustbus?rev=bf87291#bf872910143397c6dd3185dd989fbf606ded3a40"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -232,9 +239,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.50"
+version = "2.0.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74f1bdc9872430ce9b75da68329d1c1746faf50ffac5f19e02b71e37ff881ffb"
+checksum = "b699d15b36d1f02c3e7c69f8ffef53de37aefae075d8488d4ba1a7788d574a07"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -286,9 +293,9 @@ checksum = "3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b"
 
 [[package]]
 name = "wayrs-client"
-version = "1.0.2"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47dafedf9cea6c2a27479d015848a7874cd7eed0d71461b9ace072f2cf4a21a2"
+checksum = "ae384b841a260a5d86f471b21c22639a6fd41fe37c407be72a6d714fd3433bae"
 dependencies = [
  "nix",
  "thiserror",

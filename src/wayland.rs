@@ -9,9 +9,8 @@ use wayrs_client::global::*;
 use wayrs_client::proxy::Proxy;
 use wayrs_client::Connection;
 
-use std::fs::File;
 use std::io::ErrorKind;
-use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+use std::os::fd::{AsRawFd, RawFd};
 
 use crate::color::{colorramp_fill, Color};
 use crate::State;
@@ -111,8 +110,8 @@ impl Output {
         }
 
         self.color = color;
-        let fd = shmemfdrs::create_shmem(cstr!("/ramp-buffer"), self.ramp_size * 6);
-        let file = unsafe { File::from_raw_fd(fd) };
+        let file = shmemfdrs2::create_shmem(cstr!("/ramp-buffer"))?;
+        file.set_len(self.ramp_size as u64 * 6)?;
         let mut mmap = unsafe { memmap2::MmapMut::map_mut(&file)? };
         let buf = bytemuck::cast_slice_mut::<u8, u16>(&mut mmap);
         let (r, rest) = buf.split_at_mut(self.ramp_size);

@@ -15,7 +15,7 @@ clap = { version = "4.0", default-features = false, features = ["std", "help", "
 libc = "0.2"
 memmap2 = "0.9"
 rustbus-service = { git = "https://github.com/MaxVerevkin/rustbus-service", rev = "cffa791" }
-shmemfdrs = { version = "0.1", features = ["memfd"] }
+shmemfdrs2 = "1.0"
 wayrs-client = "1.0"
 wayrs-protocols = { version = "0.13", features = ["wlr-gamma-control-unstable-v1"] }
 

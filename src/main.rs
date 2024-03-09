@@ -35,15 +35,20 @@ struct State {
 
 impl State {
     pub fn color(&self) -> Color {
-        let color = self
-            .outputs
-            .iter()
-            .fold(Color::default(), |color, output| Color {
+        let color = self.outputs.iter().fold(
+            Color {
+                inverted: true,
+                brightness: 0.0,
+                temp: 0,
+                gamma: 0.0,
+            },
+            |color, output| Color {
+                inverted: color.inverted && output.color().inverted,
+                brightness: color.brightness + output.color().brightness,
                 temp: color.temp + output.color().temp,
                 gamma: color.gamma + output.color().gamma,
-                brightness: color.brightness + output.color().brightness,
-                inverted: color.inverted && output.color().inverted,
-            });
+            },
+        );
 
         Color {
             temp: color.temp / self.outputs.len() as u16,
@@ -75,6 +80,24 @@ impl State {
         }
     }
 
+    /// Returns `true` if any output was updated
+    pub fn update_brightness(&mut self, delta: f64) -> bool {
+        let mut updated = false;
+        for output in self.outputs.iter_mut() {
+            let color = output.color();
+            let brightness = (color.brightness + delta).clamp(0.0, 1.0);
+            if brightness != color.brightness {
+                updated = true;
+                output.set_color(Color {
+                    brightness,
+                    ..color
+                });
+            }
+        }
+
+        updated
+    }
+
     pub fn set_temperature(&mut self, temp: u16) {
         for output in self.outputs.iter_mut() {
             output.set_color(Color {
@@ -84,6 +107,21 @@ impl State {
         }
     }
 
+    /// Returns `true` if any output was updated
+    pub fn update_temperature(&mut self, delta: i16) -> bool {
+        let mut updated = false;
+        for output in self.outputs.iter_mut() {
+            let color = output.color();
+            let temp = (color.temp as i16 + delta).clamp(1_000, 10_000) as u16;
+            if temp != color.temp {
+                updated = true;
+                output.set_color(Color { temp, ..color });
+            }
+        }
+
+        updated
+    }
+
     pub fn set_gamma(&mut self, gamma: f64) {
         for output in self.outputs.iter_mut() {
             output.set_color(Color {
@@ -91,6 +129,21 @@ impl State {
                 ..output.color()
             });
         }
+    }
+
+    /// Returns `true` if any output was updated
+    pub fn update_gamma(&mut self, delta: f64) -> bool {
+        let mut updated = false;
+        for output in self.outputs.iter_mut() {
+            let color = output.color();
+            let gamma = (output.color().gamma + delta).max(0.1);
+            if gamma != color.gamma {
+                updated = true;
+                output.set_color(Color { gamma, ..color });
+            }
+        }
+
+        updated
     }
 }
 

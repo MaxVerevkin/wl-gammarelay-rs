@@ -116,16 +116,14 @@ struct UpdateBrightnessArgs {
 }
 
 fn update_brightness_root_cb(ctx: &mut MethodContext<State>, args: UpdateBrightnessArgs) {
-    let val = (ctx.state.color().brightness + args.delta).clamp(0.0, 1.0);
+    let updated = ctx.state.update_brightness(args.delta);
 
-    if ctx.state.color().brightness != val {
-        ctx.state.set_brightness(val);
-
+    if updated {
         let sig = prop_changed_message(
             ctx.object_path,
             "rs.wl.gammarelay",
             "Brightness",
-            val.into(),
+            ctx.state.color().brightness.into(),
         );
         ctx.conn.send.send_message_write_all(&sig).unwrap();
     }
@@ -137,7 +135,6 @@ fn get_brightness_root_cb(ctx: PropContext<State>) -> f64 {
 
 fn set_brightness_root_cb(ctx: PropContext<State>, val: UnVariant) {
     let val = val.get::<f64>().unwrap().clamp(0.0, 1.0);
-
     if ctx.state.color().brightness != val {
         ctx.state.set_brightness(val);
 
@@ -152,16 +149,14 @@ struct UpdateTemperatureArgs {
 }
 
 fn update_temperature_root_cb(ctx: &mut MethodContext<State>, args: UpdateTemperatureArgs) {
-    let val = (ctx.state.color().temp as i16 + args.delta).clamp(1_000, 10_000) as u16;
+    let updated = ctx.state.update_temperature(args.delta);
 
-    if ctx.state.color().temp != val {
-        ctx.state.set_temperature(val);
-
+    if updated {
         let sig = prop_changed_message(
             ctx.object_path,
             "rs.wl.gammarelay",
             "Temperature",
-            val.into(),
+            ctx.state.color().temp.into(),
         );
         ctx.conn.send.send_message_write_all(&sig).unwrap();
     }
@@ -187,12 +182,15 @@ struct UpdateGammaArgs {
 }
 
 fn update_gamma_root_cb(ctx: &mut MethodContext<State>, args: UpdateGammaArgs) {
-    let val = (ctx.state.color().gamma + args.delta).max(0.1);
+    let updated = ctx.state.update_gamma(args.delta);
 
-    if ctx.state.color().gamma != val {
-        ctx.state.set_gamma(val);
-
-        let sig = prop_changed_message(ctx.object_path, "rs.wl.gammarelay", "Gamma", val.into());
+    if updated {
+        let sig = prop_changed_message(
+            ctx.object_path,
+            "rs.wl.gammarelay",
+            "Gamma",
+            ctx.state.color().gamma.into(),
+        );
         ctx.conn.send.send_message_write_all(&sig).unwrap();
     }
 }

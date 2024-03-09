@@ -46,25 +46,33 @@ impl DbusServer {
         }
 
         let gammarelay_iface = InterfaceImp::new("rs.wl.gammarelay")
-            .with_method::<(), ()>("ToggleInverted", toggle_inverted_cb)
-            .with_method::<UpdateTemperatureArgs, ()>("UpdateTemperature", update_temperature_cb)
-            .with_method::<UpdateGammaArgs, ()>("UpdateGamma", update_gamma_cb)
-            .with_method::<UpdateBrightnessArgs, ()>("UpdateBrightness", update_brightness_cb)
+            .with_method::<(), ()>("ToggleInverted", toggle_inverted_root_cb)
+            .with_method::<UpdateTemperatureArgs, ()>(
+                "UpdateTemperature",
+                update_temperature_root_cb,
+            )
+            .with_method::<UpdateGammaArgs, ()>("UpdateGamma", update_gamma_root_cb)
+            .with_method::<UpdateBrightnessArgs, ()>("UpdateBrightness", update_brightness_root_cb)
             .with_prop(
                 "Inverted",
-                Access::ReadWrite(get_inverted_cb, set_inverted_cb),
+                Access::ReadWrite(get_inverted_root_cb, set_inverted_root_cb),
             )
             .with_prop(
                 "Temperature",
-                Access::ReadWrite(get_temperature_cb, set_temperature_cb),
+                Access::ReadWrite(get_temperature_root_cb, set_temperature_root_cb),
             )
-            .with_prop("Gamma", Access::ReadWrite(get_gamma_cb, set_gamma_cb))
+            .with_prop(
+                "Gamma",
+                Access::ReadWrite(get_gamma_root_cb, set_gamma_root_cb),
+            )
             .with_prop(
                 "Brightness",
-                Access::ReadWrite(get_brightness_cb, set_brightness_cb),
+                Access::ReadWrite(get_brightness_root_cb, set_brightness_root_cb),
             );
 
         service.root_mut().add_interface(gammarelay_iface);
+
+        // TODO: add other interfaces with service.get_object_mut("/outputs/[id]").add_interface()
 
         Ok(Some(Self { conn, service }))
     }
@@ -75,28 +83,27 @@ impl DbusServer {
     }
 }
 
-fn toggle_inverted_cb(ctx: &mut MethodContext<State>, _args: ()) {
-    ctx.state.color.inverted = !ctx.state.color.inverted;
-    ctx.state.color_changed = true;
+fn toggle_inverted_root_cb(ctx: &mut MethodContext<State>, _args: ()) {
+    let inverted = !ctx.state.color().inverted;
+    ctx.state.set_inverted(inverted);
 
     let sig = prop_changed_message(
         ctx.object_path,
         "rs.wl.gammarelay",
         "Inverted",
-        ctx.state.color.inverted.into(),
+        ctx.state.color().inverted.into(),
     );
     ctx.conn.send.send_message_write_all(&sig).unwrap();
 }
 
-fn get_inverted_cb(ctx: PropContext<State>) -> bool {
-    ctx.state.color.inverted
+fn get_inverted_root_cb(ctx: PropContext<State>) -> bool {
+    ctx.state.color().inverted
 }
 
-fn set_inverted_cb(ctx: PropContext<State>, val: UnVariant) {
+fn set_inverted_root_cb(ctx: PropContext<State>, val: UnVariant) {
     let val = val.get::<bool>().unwrap();
-    if ctx.state.color.inverted != val {
-        ctx.state.color.inverted = val;
-        ctx.state.color_changed = true;
+    if ctx.state.color().inverted != val {
+        ctx.state.set_inverted(val);
 
         let sig = prop_changed_message(ctx.object_path, "rs.wl.gammarelay", ctx.name, val.into());
         ctx.conn.send.send_message_write_all(&sig).unwrap();
@@ -108,12 +115,11 @@ struct UpdateBrightnessArgs {
     delta: f64,
 }
 
-fn update_brightness_cb(ctx: &mut MethodContext<State>, args: UpdateBrightnessArgs) {
-    let val = (ctx.state.color.brightness + args.delta).clamp(0.0, 1.0);
+fn update_brightness_root_cb(ctx: &mut MethodContext<State>, args: UpdateBrightnessArgs) {
+    let val = (ctx.state.color().brightness + args.delta).clamp(0.0, 1.0);
 
-    if ctx.state.color.brightness != val {
-        ctx.state.color.brightness = val;
-        ctx.state.color_changed = true;
+    if ctx.state.color().brightness != val {
+        ctx.state.set_brightness(val);
 
         let sig = prop_changed_message(
             ctx.object_path,
@@ -125,16 +131,15 @@ fn update_brightness_cb(ctx: &mut MethodContext<State>, args: UpdateBrightnessAr
     }
 }
 
-fn get_brightness_cb(ctx: PropContext<State>) -> f64 {
-    ctx.state.color.brightness
+fn get_brightness_root_cb(ctx: PropContext<State>) -> f64 {
+    ctx.state.color().brightness
 }
 
-fn set_brightness_cb(ctx: PropContext<State>, val: UnVariant) {
+fn set_brightness_root_cb(ctx: PropContext<State>, val: UnVariant) {
     let val = val.get::<f64>().unwrap().clamp(0.0, 1.0);
 
-    if ctx.state.color.brightness != val {
-        ctx.state.color.brightness = val;
-        ctx.state.color_changed = true;
+    if ctx.state.color().brightness != val {
+        ctx.state.set_brightness(val);
 
         let sig = prop_changed_message(ctx.object_path, "rs.wl.gammarelay", ctx.name, val.into());
         ctx.conn.send.send_message_write_all(&sig).unwrap();
@@ -146,12 +151,11 @@ struct UpdateTemperatureArgs {
     delta: i16,
 }
 
-fn update_temperature_cb(ctx: &mut MethodContext<State>, args: UpdateTemperatureArgs) {
-    let val = (ctx.state.color.temp as i16 + args.delta).clamp(1_000, 10_000) as u16;
+fn update_temperature_root_cb(ctx: &mut MethodContext<State>, args: UpdateTemperatureArgs) {
+    let val = (ctx.state.color().temp as i16 + args.delta).clamp(1_000, 10_000) as u16;
 
-    if ctx.state.color.temp != val {
-        ctx.state.color.temp = val;
-        ctx.state.color_changed = true;
+    if ctx.state.color().temp != val {
+        ctx.state.set_temperature(val);
 
         let sig = prop_changed_message(
             ctx.object_path,
@@ -163,15 +167,14 @@ fn update_temperature_cb(ctx: &mut MethodContext<State>, args: UpdateTemperature
     }
 }
 
-fn get_temperature_cb(ctx: PropContext<State>) -> u16 {
-    ctx.state.color.temp
+fn get_temperature_root_cb(ctx: PropContext<State>) -> u16 {
+    ctx.state.color().temp
 }
 
-fn set_temperature_cb(ctx: PropContext<State>, val: UnVariant) {
+fn set_temperature_root_cb(ctx: PropContext<State>, val: UnVariant) {
     let val = val.get::<u16>().unwrap().clamp(1_000, 10_000);
-    if ctx.state.color.temp != val {
-        ctx.state.color.temp = val;
-        ctx.state.color_changed = true;
+    if ctx.state.color().temp != val {
+        ctx.state.set_temperature(val);
 
         let sig = prop_changed_message(ctx.object_path, "rs.wl.gammarelay", ctx.name, val.into());
         ctx.conn.send.send_message_write_all(&sig).unwrap();
@@ -183,27 +186,25 @@ struct UpdateGammaArgs {
     delta: f64,
 }
 
-fn update_gamma_cb(ctx: &mut MethodContext<State>, args: UpdateGammaArgs) {
-    let val = (ctx.state.color.gamma + args.delta).max(0.1);
+fn update_gamma_root_cb(ctx: &mut MethodContext<State>, args: UpdateGammaArgs) {
+    let val = (ctx.state.color().gamma + args.delta).max(0.1);
 
-    if ctx.state.color.gamma != val {
-        ctx.state.color.gamma = val;
-        ctx.state.color_changed = true;
+    if ctx.state.color().gamma != val {
+        ctx.state.set_gamma(val);
 
         let sig = prop_changed_message(ctx.object_path, "rs.wl.gammarelay", "Gamma", val.into());
         ctx.conn.send.send_message_write_all(&sig).unwrap();
     }
 }
 
-fn get_gamma_cb(ctx: PropContext<State>) -> f64 {
-    ctx.state.color.gamma
+fn get_gamma_root_cb(ctx: PropContext<State>) -> f64 {
+    ctx.state.color().gamma
 }
 
-fn set_gamma_cb(ctx: PropContext<State>, val: UnVariant) {
+fn set_gamma_root_cb(ctx: PropContext<State>, val: UnVariant) {
     let val = val.get::<f64>().unwrap().max(0.1);
-    if ctx.state.color.gamma != val {
-        ctx.state.color.gamma = val;
-        ctx.state.color_changed = true;
+    if ctx.state.color().gamma != val {
+        ctx.state.set_gamma(val);
 
         let sig = prop_changed_message(ctx.object_path, "rs.wl.gammarelay", ctx.name, val.into());
         ctx.conn.send.send_message_write_all(&sig).unwrap();

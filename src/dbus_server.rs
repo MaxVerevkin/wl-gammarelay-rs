@@ -1,7 +1,10 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::os::fd::{AsRawFd, RawFd};
+use std::rc::Rc;
 
-use crate::State;
+use crate::color::Color;
+use crate::{wayland, State};
 use anyhow::Result;
 use rustbus::{
     connection::Timeout,
@@ -45,7 +48,7 @@ impl DbusServer {
             return Ok(None);
         }
 
-        let gammarelay_iface = InterfaceImp::new("rs.wl.gammarelay")
+        let gammarelay_root_iface = InterfaceImp::new("rs.wl.gammarelay")
             .with_method::<(), ()>("ToggleInverted", toggle_inverted_root_cb)
             .with_method::<UpdateTemperatureArgs, ()>(
                 "UpdateTemperature",
@@ -70,11 +73,215 @@ impl DbusServer {
                 Access::ReadWrite(get_brightness_root_cb, set_brightness_root_cb),
             );
 
-        service.root_mut().add_interface(gammarelay_iface);
-
-        // TODO: add other interfaces with service.get_object_mut("/outputs/[id]").add_interface()
+        let root = service.root_mut();
+        root.add_interface(gammarelay_root_iface);
+        root.add_child("outputs", rustbus_service::Object::new());
 
         Ok(Some(Self { conn, service }))
+    }
+
+    pub fn add_output(&mut self, output: Rc<RefCell<wayland::Output>>) {
+        let toggle_inverted_output_cb = |ctx: &mut MethodContext<State>, _args: ()| {
+            let global_color = ctx.state.color();
+
+            let output = output.clone().borrow_mut();
+            let color = output.color();
+            let inverted = !color.inverted;
+            output.set_color(Color { inverted, ..color });
+
+            let value = inverted.into();
+            signal_change(&mut ctx.conn.send, ctx.object_path, "Inverted", value);
+
+            if ctx.state.color().inverted != global_color.inverted {
+                let value = inverted.into();
+                signal_change(&mut ctx.conn.send, "/", "Inverted", value);
+            }
+        };
+
+        let get_inverted_output_cb = |ctx: PropContext<State>| output.borrow().color().inverted;
+
+        let set_inverted_output_cb = |ctx: PropContext<State>, val: UnVariant| {
+            let global_color = ctx.state.color();
+
+            let output = output.borrow_mut();
+            let color = output.color();
+            let inverted = val.get::<bool>().unwrap();
+
+            if color.inverted != inverted {
+                output.set_color(Color { inverted, ..color });
+
+                let value = inverted.into();
+                signal_change(&mut ctx.conn.send, ctx.object_path, "Inverted", value);
+
+                if ctx.state.color().inverted != global_color.inverted {
+                    let value = inverted.into();
+                    signal_change(&mut ctx.conn.send, "/", "Inverted", value);
+                }
+            }
+        };
+
+        let update_brightness_output_cb =
+            |ctx: &mut MethodContext<State>, args: UpdateBrightnessArgs| {
+                let global_color = ctx.state.color();
+
+                let output = output.borrow_mut();
+                let color = output.color();
+                let brightness = (color.brightness + args.delta).clamp(0.0, 1.0);
+
+                if color.brightness != brightness {
+                    let value = brightness.into();
+                    signal_change(&mut ctx.conn.send, ctx.object_path, "Brightness", value);
+
+                    let brightness = ctx.state.color().brightness;
+                    if brightness != global_color.brightness {
+                        let value = brightness.into();
+                        signal_change(&mut ctx.conn.send, "/", "Brightness", value);
+                    }
+                }
+            };
+
+        let get_brightness_output_cb = |ctx: PropContext<State>| output.borrow().color().brightness;
+
+        let set_brightness_output_cb = |ctx: PropContext<State>, val: UnVariant| {
+            let global_color = ctx.state.color();
+
+            let output = output.borrow_mut();
+            let color = output.color();
+            let brightness = val.get::<f64>().unwrap().clamp(0.0, 1.0);
+
+            if color.brightness != brightness {
+                let value = brightness.into();
+                signal_change(&mut ctx.conn.send, ctx.object_path, "Brightness", value);
+
+                let brightness = ctx.state.color().brightness;
+                if brightness != global_color.brightness {
+                    let value = brightness.into();
+                    signal_change(&mut ctx.conn.send, "/", "Brightness", value);
+                }
+            }
+        };
+
+        let update_temperature_output_cb =
+            |ctx: &mut MethodContext<State>, args: UpdateTemperatureArgs| {
+                let global_color = ctx.state.color();
+
+                let output = output.borrow_mut();
+                let color = output.color();
+                let temp = (color.temp as i16 + args.delta).clamp(1_000, 10_000) as u16;
+
+                if color.temp != temp {
+                    let value = temp.into();
+                    signal_change(&mut ctx.conn.send, ctx.object_path, "Temperature", value);
+
+                    let temp = ctx.state.color().temp;
+                    if temp != global_color.temp {
+                        let value = temp.into();
+                        signal_change(&mut ctx.conn.send, "/", "Temperature", value);
+                    }
+                }
+            };
+
+        let get_temperature_output_cb = |ctx: PropContext<State>| output.borrow().color().temp;
+
+        let set_temperature_output_cb = |ctx: PropContext<State>, val: UnVariant| {
+            let global_color = ctx.state.color();
+
+            let output = output.borrow_mut();
+            let color = output.color();
+            let temp = val.get::<u16>().unwrap().clamp(1_000, 10_000);
+
+            if color.temp != temp {
+                let value = temp.into();
+                signal_change(&mut ctx.conn.send, ctx.object_path, "Temperature", value);
+
+                let temp = ctx.state.color().temp;
+                if temp != global_color.temp {
+                    let value = temp.into();
+                    signal_change(&mut ctx.conn.send, "/", "Temperature", value);
+                }
+            }
+        };
+
+        let update_gamma_output_cb = |ctx: &mut MethodContext<State>, args: UpdateGammaArgs| {
+            let global_color = ctx.state.color();
+
+            let output = output.borrow_mut();
+            let color = output.color();
+            let gamma = (color.gamma + args.delta).max(0.1);
+
+            if color.gamma != gamma {
+                let value = gamma.into();
+                signal_change(&mut ctx.conn.send, ctx.object_path, "Gamma", value);
+
+                let gamma = ctx.state.color().gamma;
+                if gamma != global_color.gamma {
+                    let value = gamma.into();
+                    signal_change(&mut ctx.conn.send, "/", "Gamma", value);
+                }
+            }
+        };
+
+        let get_gamma_output_cb = |ctx: PropContext<State>| output.borrow().color().gamma;
+
+        let set_gamma_output_cb = |ctx: PropContext<State>, val: UnVariant| {
+            let global_color = ctx.state.color();
+
+            let output = output.borrow_mut();
+            let color = output.color();
+            let gamma = val.get::<f64>().unwrap().max(0.1);
+
+            if color.gamma != gamma {
+                let value = gamma.into();
+                signal_change(&mut ctx.conn.send, ctx.object_path, "Gamma", value);
+
+                let gamma = ctx.state.color().gamma;
+                if gamma != global_color.gamma {
+                    let value = gamma.into();
+                    signal_change(&mut ctx.conn.send, "/", "Gamma", value);
+                }
+            }
+        };
+
+        let gammarelay_output_iface = InterfaceImp::new("rs.wl.gammarelay")
+            .with_method::<(), ()>("ToggleInverted", toggle_inverted_output_cb)
+            .with_method::<UpdateTemperatureArgs, ()>(
+                "UpdateTemperature",
+                update_temperature_output_cb,
+            )
+            .with_method::<UpdateGammaArgs, ()>("UpdateGamma", update_gamma_output_cb)
+            .with_method::<UpdateBrightnessArgs, ()>(
+                "UpdateBrightness",
+                update_brightness_output_cb,
+            )
+            .with_prop(
+                "Inverted",
+                Access::ReadWrite(get_inverted_output_cb, set_inverted_output_cb),
+            )
+            .with_prop(
+                "Temperature",
+                Access::ReadWrite(get_temperature_output_cb, set_temperature_output_cb),
+            )
+            .with_prop(
+                "Gamma",
+                Access::ReadWrite(get_gamma_output_cb, set_gamma_output_cb),
+            )
+            .with_prop(
+                "Brightness",
+                Access::ReadWrite(get_brightness_output_cb, set_brightness_output_cb),
+            );
+
+        let mut object = rustbus_service::Object::new();
+        object.add_interface(gammarelay_output_iface);
+
+        let outputs_object = self
+            .service
+            .get_object_mut("/outputs")
+            .expect("object /outputs not found");
+        outputs_object.add_child(output.borrow().name().replace('-', "_"), object);
+    }
+
+    pub fn remove_output(&mut self, name: &str) {
+        todo!();
     }
 
     pub fn poll(&mut self, state: &mut State) -> Result<()> {
@@ -91,7 +298,7 @@ fn toggle_inverted_root_cb(ctx: &mut MethodContext<State>, _args: ()) {
         ctx.object_path,
         "rs.wl.gammarelay",
         "Inverted",
-        ctx.state.color().inverted.into(),
+        inverted.into(),
     );
     ctx.conn.send.send_message_write_all(&sig).unwrap();
 }
@@ -226,4 +433,9 @@ fn prop_changed_message(path: &str, iface: &str, prop: &str, value: Param) -> Ma
     sig.body.push_param(map).unwrap();
     sig.body.push_param::<&[&str]>(&[]).unwrap();
     sig
+}
+
+fn signal_change(send: &mut rustbus::SendConn, path: &str, prop: &str, value: Param) {
+    let output_sig = prop_changed_message(path, "rs.wl.gammarelay", prop, value);
+    send.send_message_write_all(&output_sig).unwrap();
 }

@@ -3,10 +3,12 @@ mod dbus_client;
 mod dbus_server;
 mod wayland;
 
-use std::io;
+use std::cell::RefCell;
 use std::os::fd::AsRawFd;
+use std::{io, rc::Rc};
 
 use clap::{Parser, Subcommand};
+use dbus_server::DbusServer;
 use wayrs_protocols::wlr_gamma_control_unstable_v1::ZwlrGammaControlManagerV1;
 
 use color::Color;
@@ -27,10 +29,9 @@ enum Command {
 }
 
 struct State {
-    outputs: Vec<wayland::Output>,
+    outputs: Vec<Rc<RefCell<wayland::Output>>>,
     gamma_manager: ZwlrGammaControlManagerV1,
-    new_output_names: Vec<String>,
-    output_names_to_delete: Vec<String>,
+    dbus_server: Rc<RefCell<DbusServer>>,
 }
 
 impl State {
@@ -42,11 +43,14 @@ impl State {
                 temp: 0,
                 gamma: 0.0,
             },
-            |color, output| Color {
-                inverted: color.inverted && output.color().inverted,
-                brightness: color.brightness + output.color().brightness,
-                temp: color.temp + output.color().temp,
-                gamma: color.gamma + output.color().gamma,
+            |color, output| {
+                let output_color = output.borrow().color();
+                Color {
+                    inverted: color.inverted && output_color.inverted,
+                    brightness: color.brightness + output_color.brightness,
+                    temp: color.temp + output_color.temp,
+                    gamma: color.gamma + output_color.gamma,
+                }
             },
         );
 
@@ -59,23 +63,26 @@ impl State {
     }
 
     pub fn color_changed(&self) -> bool {
-        self.outputs.iter().any(|output| output.color_changed())
+        self.outputs
+            .iter()
+            .any(|output| output.borrow().color_changed())
     }
 
     pub fn set_inverted(&mut self, inverted: bool) {
-        for output in self.outputs.iter_mut() {
-            output.set_color(Color {
-                inverted,
-                ..output.color()
-            });
+        for output in &self.outputs {
+            let mut output = output.borrow_mut();
+            let color = output.color();
+            output.set_color(Color { inverted, ..color });
         }
     }
 
     pub fn set_brightness(&mut self, brightness: f64) {
         for output in self.outputs.iter_mut() {
+            let mut output = output.borrow_mut();
+            let color = output.color();
             output.set_color(Color {
                 brightness,
-                ..output.color()
+                ..color
             });
         }
     }
@@ -83,7 +90,8 @@ impl State {
     /// Returns `true` if any output was updated
     pub fn update_brightness(&mut self, delta: f64) -> bool {
         let mut updated = false;
-        for output in self.outputs.iter_mut() {
+        for output in &self.outputs {
+            let mut output = output.borrow_mut();
             let color = output.color();
             let brightness = (color.brightness + delta).clamp(0.0, 1.0);
             if brightness != color.brightness {
@@ -99,18 +107,18 @@ impl State {
     }
 
     pub fn set_temperature(&mut self, temp: u16) {
-        for output in self.outputs.iter_mut() {
-            output.set_color(Color {
-                temp,
-                ..output.color()
-            });
+        for output in &self.outputs {
+            let mut output = output.borrow_mut();
+            let color = output.color();
+            output.set_color(Color { temp, ..color });
         }
     }
 
     /// Returns `true` if any output was updated
     pub fn update_temperature(&mut self, delta: i16) -> bool {
         let mut updated = false;
-        for output in self.outputs.iter_mut() {
+        for output in &self.outputs {
+            let mut output = output.borrow_mut();
             let color = output.color();
             let temp = (color.temp as i16 + delta).clamp(1_000, 10_000) as u16;
             if temp != color.temp {
@@ -124,17 +132,17 @@ impl State {
 
     pub fn set_gamma(&mut self, gamma: f64) {
         for output in self.outputs.iter_mut() {
-            output.set_color(Color {
-                gamma,
-                ..output.color()
-            });
+            let mut output = output.borrow_mut();
+            let color = output.color();
+            output.set_color(Color { gamma, ..color });
         }
     }
 
     /// Returns `true` if any output was updated
     pub fn update_gamma(&mut self, delta: f64) -> bool {
         let mut updated = false;
-        for output in self.outputs.iter_mut() {
+        for output in &self.outputs {
+            let mut output = output.borrow_mut();
             let color = output.color();
             let gamma = (output.color().gamma + delta).max(0.1);
             if gamma != color.gamma {
@@ -148,20 +156,24 @@ impl State {
 }
 
 fn main() -> anyhow::Result<()> {
-    let commnad = Cli::parse().command.unwrap_or(Command::Run);
+    let command = Cli::parse().command.unwrap_or(Command::Run);
     let dbus_server = dbus_server::DbusServer::new()?;
 
-    match commnad {
+    match command {
         Command::Run => {
-            if let Some(mut dbus_server) = dbus_server {
-                let (mut wayland, mut state) = wayland::Wayland::new()?;
+            if let Some(dbus_server) = dbus_server {
+                let dbus_server = Rc::new(RefCell::new(dbus_server));
+                let (mut wayland, mut state) = wayland::Wayland::new(dbus_server.clone())?;
 
-                let mut fds = [pollin(&dbus_server), pollin(&wayland)];
+                let mut fds = {
+                    let dbus_server = dbus_server.borrow().as_raw_fd();
+                    [pollin(&dbus_server), pollin(&wayland)]
+                };
 
                 loop {
                     poll(&mut fds)?;
                     if fds[0].revents != 0 {
-                        dbus_server.poll(&mut state)?;
+                        dbus_server.borrow_mut().poll(&mut state)?;
                     }
                     if fds[1].revents != 0 || state.color_changed() {
                         wayland.poll(&mut state)?;
@@ -173,15 +185,19 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Watch { format } => {
             let mut dbus_client = dbus_client::DbusClient::new(format, dbus_server.is_none())?;
-            if let Some(mut dbus_server) = dbus_server {
-                let (mut wayland, mut state) = wayland::Wayland::new()?;
+            if let Some(dbus_server) = dbus_server {
+                let dbus_server = Rc::new(RefCell::new(dbus_server));
+                let (mut wayland, mut state) = wayland::Wayland::new(dbus_server.clone())?;
 
-                let mut fds = [pollin(&dbus_server), pollin(&wayland), pollin(&dbus_client)];
+                let mut fds = {
+                    let dbus_server = dbus_server.borrow().as_raw_fd();
+                    [pollin(&dbus_server), pollin(&wayland), pollin(&dbus_client)]
+                };
 
                 loop {
                     poll(&mut fds)?;
                     if fds[0].revents != 0 {
-                        dbus_server.poll(&mut state)?;
+                        dbus_server.borrow_mut().poll(&mut state)?;
                     }
                     if fds[1].revents != 0 || state.color_changed() {
                         wayland.poll(&mut state)?;

@@ -29,12 +29,24 @@ enum Command {
 }
 
 struct State {
-    outputs: Vec<Rc<RefCell<wayland::Output>>>,
+    outputs: Vec<wayland::Output>,
     gamma_manager: ZwlrGammaControlManagerV1,
     dbus_server: Rc<RefCell<DbusServer>>,
 }
 
 impl State {
+    pub fn output_by_reg_name(&self, reg_name: u32) -> Option<&wayland::Output> {
+        self.outputs
+            .iter()
+            .find(|output| output.reg_name() == reg_name)
+    }
+
+    pub fn mut_output_by_reg_name(&mut self, reg_name: u32) -> Option<&mut wayland::Output> {
+        self.outputs
+            .iter_mut()
+            .find(|output| output.reg_name() == reg_name)
+    }
+
     pub fn color(&self) -> Color {
         let color = self.outputs.iter().fold(
             Color {
@@ -44,7 +56,7 @@ impl State {
                 gamma: 0.0,
             },
             |color, output| {
-                let output_color = output.borrow().color();
+                let output_color = output.color();
                 Color {
                     inverted: color.inverted && output_color.inverted,
                     brightness: color.brightness + output_color.brightness,
@@ -63,22 +75,18 @@ impl State {
     }
 
     pub fn color_changed(&self) -> bool {
-        self.outputs
-            .iter()
-            .any(|output| output.borrow().color_changed())
+        self.outputs.iter().any(|output| output.color_changed())
     }
 
     pub fn set_inverted(&mut self, inverted: bool) {
-        for output in &self.outputs {
-            let mut output = output.borrow_mut();
+        for output in &mut self.outputs {
             let color = output.color();
             output.set_color(Color { inverted, ..color });
         }
     }
 
     pub fn set_brightness(&mut self, brightness: f64) {
-        for output in self.outputs.iter_mut() {
-            let mut output = output.borrow_mut();
+        for output in &mut self.outputs {
             let color = output.color();
             output.set_color(Color {
                 brightness,
@@ -90,8 +98,7 @@ impl State {
     /// Returns `true` if any output was updated
     pub fn update_brightness(&mut self, delta: f64) -> bool {
         let mut updated = false;
-        for output in &self.outputs {
-            let mut output = output.borrow_mut();
+        for output in &mut self.outputs {
             let color = output.color();
             let brightness = (color.brightness + delta).clamp(0.0, 1.0);
             if brightness != color.brightness {
@@ -107,8 +114,7 @@ impl State {
     }
 
     pub fn set_temperature(&mut self, temp: u16) {
-        for output in &self.outputs {
-            let mut output = output.borrow_mut();
+        for output in &mut self.outputs {
             let color = output.color();
             output.set_color(Color { temp, ..color });
         }
@@ -117,8 +123,7 @@ impl State {
     /// Returns `true` if any output was updated
     pub fn update_temperature(&mut self, delta: i16) -> bool {
         let mut updated = false;
-        for output in &self.outputs {
-            let mut output = output.borrow_mut();
+        for output in &mut self.outputs {
             let color = output.color();
             let temp = (color.temp as i16 + delta).clamp(1_000, 10_000) as u16;
             if temp != color.temp {
@@ -131,8 +136,7 @@ impl State {
     }
 
     pub fn set_gamma(&mut self, gamma: f64) {
-        for output in self.outputs.iter_mut() {
-            let mut output = output.borrow_mut();
+        for output in &mut self.outputs {
             let color = output.color();
             output.set_color(Color { gamma, ..color });
         }
@@ -141,8 +145,7 @@ impl State {
     /// Returns `true` if any output was updated
     pub fn update_gamma(&mut self, delta: f64) -> bool {
         let mut updated = false;
-        for output in &self.outputs {
-            let mut output = output.borrow_mut();
+        for output in &mut self.outputs {
             let color = output.color();
             let gamma = (output.color().gamma + delta).max(0.1);
             if gamma != color.gamma {

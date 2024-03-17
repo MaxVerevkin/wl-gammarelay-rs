@@ -336,13 +336,13 @@ fn toggle_inverted_root_cb(ctx: &mut MethodContext<WaylandState>, _args: ()) {
     let inverted = !ctx.state.color().inverted;
     ctx.state.set_inverted(inverted);
 
-    let sig = prop_changed_message(
+    signal_change(
+        &mut ctx.conn.send,
         ctx.object_path,
-        "rs.wl.gammarelay",
         "Inverted",
         inverted.into(),
     );
-    ctx.conn.send.send_message_write_all(&sig).unwrap();
+    signal_updated_property_to_outputs(ctx, "Inverted", inverted.into());
 }
 
 fn get_inverted_root_cb(ctx: PropContext<WaylandState>) -> bool {
@@ -354,8 +354,8 @@ fn set_inverted_root_cb(ctx: PropContext<WaylandState>, val: UnVariant) {
     if ctx.state.color().inverted != val {
         ctx.state.set_inverted(val);
 
-        let sig = prop_changed_message(ctx.object_path, "rs.wl.gammarelay", ctx.name, val.into());
-        ctx.conn.send.send_message_write_all(&sig).unwrap();
+        signal_change(&mut ctx.conn.send, ctx.object_path, ctx.name, val.into());
+        signal_set_property_to_outputs(ctx, val.into());
     }
 }
 
@@ -368,13 +368,14 @@ fn update_brightness_root_cb(ctx: &mut MethodContext<WaylandState>, args: Update
     let updated = ctx.state.update_brightness(args.delta);
 
     if updated {
-        let sig = prop_changed_message(
+        let val = ctx.state.color().brightness;
+        signal_change(
+            &mut ctx.conn.send,
             ctx.object_path,
-            "rs.wl.gammarelay",
             "Brightness",
-            ctx.state.color().brightness.into(),
+            val.into(),
         );
-        ctx.conn.send.send_message_write_all(&sig).unwrap();
+        signal_updated_property_to_outputs(ctx, "Brightness", val.into());
     }
 }
 
@@ -387,8 +388,8 @@ fn set_brightness_root_cb(ctx: PropContext<WaylandState>, val: UnVariant) {
     if ctx.state.color().brightness != val {
         ctx.state.set_brightness(val);
 
-        let sig = prop_changed_message(ctx.object_path, "rs.wl.gammarelay", ctx.name, val.into());
-        ctx.conn.send.send_message_write_all(&sig).unwrap();
+        signal_change(&mut ctx.conn.send, ctx.object_path, ctx.name, val.into());
+        signal_set_property_to_outputs(ctx, val.into());
     }
 }
 
@@ -401,13 +402,14 @@ fn update_temperature_root_cb(ctx: &mut MethodContext<WaylandState>, args: Updat
     let updated = ctx.state.update_temperature(args.delta);
 
     if updated {
-        let sig = prop_changed_message(
+        let val = ctx.state.color().temp;
+        signal_change(
+            &mut ctx.conn.send,
             ctx.object_path,
-            "rs.wl.gammarelay",
             "Temperature",
-            ctx.state.color().temp.into(),
+            val.into(),
         );
-        ctx.conn.send.send_message_write_all(&sig).unwrap();
+        signal_updated_property_to_outputs(ctx, "Temperature", val.into());
     }
 }
 
@@ -420,8 +422,8 @@ fn set_temperature_root_cb(ctx: PropContext<WaylandState>, val: UnVariant) {
     if ctx.state.color().temp != val {
         ctx.state.set_temperature(val);
 
-        let sig = prop_changed_message(ctx.object_path, "rs.wl.gammarelay", ctx.name, val.into());
-        ctx.conn.send.send_message_write_all(&sig).unwrap();
+        signal_change(&mut ctx.conn.send, ctx.object_path, ctx.name, val.into());
+        signal_set_property_to_outputs(ctx, val.into());
     }
 }
 
@@ -434,13 +436,9 @@ fn update_gamma_root_cb(ctx: &mut MethodContext<WaylandState>, args: UpdateGamma
     let updated = ctx.state.update_gamma(args.delta);
 
     if updated {
-        let sig = prop_changed_message(
-            ctx.object_path,
-            "rs.wl.gammarelay",
-            "Gamma",
-            ctx.state.color().gamma.into(),
-        );
-        ctx.conn.send.send_message_write_all(&sig).unwrap();
+        let val = ctx.state.color().gamma;
+        signal_change(&mut ctx.conn.send, ctx.object_path, "Gamma", val.into());
+        signal_updated_property_to_outputs(ctx, "Gamma", val.into());
     }
 }
 
@@ -453,8 +451,8 @@ fn set_gamma_root_cb(ctx: PropContext<WaylandState>, val: UnVariant) {
     if ctx.state.color().gamma != val {
         ctx.state.set_gamma(val);
 
-        let sig = prop_changed_message(ctx.object_path, "rs.wl.gammarelay", ctx.name, val.into());
-        ctx.conn.send.send_message_write_all(&sig).unwrap();
+        signal_change(&mut ctx.conn.send, ctx.object_path, ctx.name, val.into());
+        signal_set_property_to_outputs(ctx, val.into());
     }
 }
 
@@ -480,4 +478,40 @@ fn prop_changed_message(path: &str, iface: &str, prop: &str, value: Param) -> Ma
 fn signal_change(send: &mut rustbus::SendConn, path: &str, prop: &str, value: Param) {
     let output_sig = prop_changed_message(path, "rs.wl.gammarelay", prop, value);
     send.send_message_write_all(&output_sig).unwrap();
+}
+
+fn signal_set_property_to_outputs(ctx: PropContext<WaylandState>, value: Param) {
+    for output in ctx
+        .state
+        .outputs
+        .iter()
+        .filter(|output| output.color_changed())
+    {
+        signal_change(
+            &mut ctx.conn.send,
+            &output.object_path(),
+            ctx.name,
+            value.clone(),
+        );
+    }
+}
+
+fn signal_updated_property_to_outputs(
+    ctx: &mut MethodContext<WaylandState>,
+    name: &str,
+    value: Param,
+) {
+    for output in ctx
+        .state
+        .outputs
+        .iter()
+        .filter(|output| output.color_changed())
+    {
+        signal_change(
+            &mut ctx.conn.send,
+            &output.object_path(),
+            name,
+            value.clone(),
+        );
+    }
 }

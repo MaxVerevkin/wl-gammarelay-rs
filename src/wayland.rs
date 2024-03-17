@@ -128,6 +128,10 @@ impl Output {
         self.color_changed = true;
     }
 
+    pub fn object_path(&self) -> String {
+        format!("/outputs/{}", self.name().replace('-', "_"))
+    }
+
     fn update_displayed_color(&mut self, conn: &mut Connection<State>) -> Result<()> {
         if self.ramp_size == 0 {
             return Ok(());

@@ -1,402 +1,458 @@
-use std::sync::Arc;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::os::fd::{AsRawFd, RawFd};
+use std::rc::Rc;
 
 use crate::color::Color;
-use crate::wayland::Request;
+use crate::{wayland, State};
 use anyhow::Result;
-use tokio::sync::{mpsc, Mutex};
-use zbus::{dbus_interface, Connection};
+use rustbus::{
+    connection::Timeout,
+    get_session_bus_path,
+    message_builder::MarshalledMessage,
+    params::{Param, Variant},
+    wire::unmarshal::traits::Variant as UnVariant,
+    DuplexConn, MessageBuilder,
+};
+use rustbus_service::rustbus;
+use rustbus_service::{Access, InterfaceImp, MethodContext, PropContext, Service};
 
-#[derive(Debug, Default, Clone)]
-pub struct RootServer {
-    outputs: Arc<Mutex<Vec<Arc<Mutex<Output>>>>>,
+pub struct DbusServer {
+    conn: DuplexConn,
+    service: Service<State>,
 }
 
-#[derive(Debug)]
-struct Server(Arc<Mutex<Output>>);
-
-#[derive(Debug)]
-struct Output {
-    tx: mpsc::Sender<Request>,
-    color: Color,
-    output_name: String,
-}
-
-pub async fn run() -> Result<Option<(Connection, RootServer)>> {
-    let mut builder = zbus::ConnectionBuilder::session()?;
-    let root_server = RootServer::default();
-    builder = builder.serve_at("/", root_server.clone())?;
-    builder = builder.name("rs.wl-gammarelay")?;
-    let session = builder.build().await;
-    match session {
-        Err(zbus::Error::NameTaken) => Ok(None),
-        Err(e) => Err(e.into()),
-        Ok(server) => Ok(Some((server, root_server))),
+impl AsRawFd for DbusServer {
+    fn as_raw_fd(&self) -> RawFd {
+        self.conn.as_raw_fd()
     }
 }
 
-impl Output {
-    async fn send_color(&self) {
-        let _ = self
-            .tx
-            .send(Request::SetColor {
-                color: self.color,
-                output_name: self.output_name.clone(),
-            })
-            .await;
-    }
-}
+impl DbusServer {
+    pub fn new() -> Result<Option<Self>> {
+        let mut conn = rustbus::DuplexConn::connect_to_bus(get_session_bus_path()?, true)?;
+        conn.send_hello(Timeout::Infinite)?;
 
-#[dbus_interface(name = "rs.wl.gammarelay")]
-impl Server {
-    #[dbus_interface(property)]
-    async fn temperature(&self) -> u16 {
-        let output = self.0.lock().await;
-        output.color.temp
-    }
+        let mut service = Service::new();
 
-    #[dbus_interface(property)]
-    async fn set_temperature(&mut self, temp: u16) -> Result<(), zbus::fdo::Error> {
-        if (1000..=10000).contains(&temp) {
-            let mut output = self.0.lock().await;
-            output.color.temp = temp;
-            output.send_color().await;
-            Ok(())
-        } else {
-            Err(zbus::fdo::Error::InvalidArgs(
-                "temperature must be in range [1000,10000]".into(),
-            ))
-        }
-    }
-
-    async fn update_temperature(
-        &mut self,
-        #[zbus(signal_context)] cx: zbus::SignalContext<'_>,
-        delta_temp: i16,
-    ) -> Result<(), zbus::fdo::Error> {
+        let req_name_serial =
+            conn.send
+                .send_message_write_all(&rustbus::standard_messages::request_name(
+                    "rs.wl-gammarelay",
+                    0,
+                ))?;
+        let req_name_resp = service.get_reply(&mut conn, req_name_serial, Timeout::Infinite)?;
+        if req_name_resp.body.parser().get::<u32>()?
+            != rustbus::standard_messages::DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER
         {
-            let mut output = self.0.lock().await;
-            output.color.temp = (output.color.temp as i16 + delta_temp).clamp(1_000, 10_000) as _;
-            output.send_color().await;
+            return Ok(None);
         }
-        self.temperature_changed(&cx).await?;
-        Ok(())
+
+        let gammarelay_root_iface = InterfaceImp::new("rs.wl.gammarelay")
+            .with_method::<(), ()>("ToggleInverted", toggle_inverted_root_cb)
+            .with_method::<UpdateTemperatureArgs, ()>(
+                "UpdateTemperature",
+                update_temperature_root_cb,
+            )
+            .with_method::<UpdateGammaArgs, ()>("UpdateGamma", update_gamma_root_cb)
+            .with_method::<UpdateBrightnessArgs, ()>("UpdateBrightness", update_brightness_root_cb)
+            .with_prop(
+                "Inverted",
+                Access::ReadWrite(get_inverted_root_cb, set_inverted_root_cb),
+            )
+            .with_prop(
+                "Temperature",
+                Access::ReadWrite(get_temperature_root_cb, set_temperature_root_cb),
+            )
+            .with_prop(
+                "Gamma",
+                Access::ReadWrite(get_gamma_root_cb, set_gamma_root_cb),
+            )
+            .with_prop(
+                "Brightness",
+                Access::ReadWrite(get_brightness_root_cb, set_brightness_root_cb),
+            );
+
+        let root = service.root_mut();
+        root.add_interface(gammarelay_root_iface);
+        root.add_child("outputs", rustbus_service::Object::new());
+
+        Ok(Some(Self { conn, service }))
     }
 
-    #[dbus_interface(property)]
-    async fn gamma(&self) -> f64 {
-        let output = self.0.lock().await;
-        output.color.gamma
-    }
+    pub fn add_output(&mut self, output: Rc<RefCell<wayland::Output>>) {
+        let output_clone = output.clone();
+        let toggle_inverted_output_cb = move |ctx: &mut MethodContext<State>, _args: ()| {
+            let global_color = ctx.state.color();
 
-    #[dbus_interface(property)]
-    async fn set_gamma(&mut self, gamma: f64) -> Result<(), zbus::fdo::Error> {
-        if gamma > 0.0 {
-            let mut output = self.0.lock().await;
-            output.color.gamma = gamma;
-            output.send_color().await;
-            Ok(())
-        } else {
-            Err(zbus::fdo::Error::InvalidArgs(
-                "gamma must be greater than zero".into(),
-            ))
-        }
-    }
+            let mut output = output_clone.borrow_mut();
+            let color = output.color();
+            let inverted = !color.inverted;
+            output.set_color(Color { inverted, ..color });
 
-    async fn update_gamma(
-        &mut self,
-        #[zbus(signal_context)] cx: zbus::SignalContext<'_>,
-        delta_gamma: f64,
-    ) -> Result<(), zbus::fdo::Error> {
-        {
-            let mut output = self.0.lock().await;
-            output.color.gamma = (output.color.gamma + delta_gamma).max(0.0);
-            output.send_color().await;
-        }
-        self.gamma_changed(&cx).await?;
-        Ok(())
-    }
+            let value = inverted.into();
+            signal_change(&mut ctx.conn.send, ctx.object_path, "Inverted", value);
 
-    #[dbus_interface(property)]
-    async fn brightness(&self) -> f64 {
-        let output = self.0.lock().await;
-        output.color.brightness
-    }
-
-    #[dbus_interface(property)]
-    async fn set_brightness(&mut self, brightness: f64) -> Result<(), zbus::fdo::Error> {
-        if (0.0..=1.0).contains(&brightness) {
-            let mut output = self.0.lock().await;
-            output.color.brightness = brightness;
-            output.send_color().await;
-            Ok(())
-        } else {
-            Err(zbus::fdo::Error::InvalidArgs(
-                "brightness must be in range [0,1]".into(),
-            ))
-        }
-    }
-
-    async fn update_brightness(
-        &mut self,
-        #[zbus(signal_context)] cx: zbus::SignalContext<'_>,
-        delta_brightness: f64,
-    ) -> Result<(), zbus::fdo::Error> {
-        {
-            let mut output = self.0.lock().await;
-            output.color.brightness = (output.color.brightness + delta_brightness).clamp(0.0, 1.0);
-            output.send_color().await;
-        }
-        self.brightness_changed(&cx).await?;
-        Ok(())
-    }
-
-    #[dbus_interface(property)]
-    async fn inverted(&self) -> bool {
-        let output = self.0.lock().await;
-        output.color.inverted
-    }
-
-    #[dbus_interface(property)]
-    async fn set_inverted(&mut self, value: bool) {
-        let mut output = self.0.lock().await;
-        output.color.inverted = value;
-        output.send_color().await;
-    }
-
-    async fn toggle_inverted(
-        &mut self,
-        #[zbus(signal_context)] cx: zbus::SignalContext<'_>,
-    ) -> Result<(), zbus::fdo::Error> {
-        {
-            let mut output = self.0.lock().await;
-            output.color.inverted = !output.color.inverted;
-            output.send_color().await;
-        }
-        self.brightness_changed(&cx).await?;
-        Ok(())
-    }
-}
-
-impl RootServer {
-    pub async fn add_output(
-        &self,
-        instance: &mut Connection,
-        tx: mpsc::Sender<Request>,
-        output_name: String,
-    ) -> Result<()> {
-        let path = format!("/outputs/{}", output_name.replace('-', "_"));
-        let output = Output {
-            tx,
-            output_name,
-            color: Default::default(),
+            if ctx.state.color().inverted != global_color.inverted {
+                let value = inverted.into();
+                signal_change(&mut ctx.conn.send, "/", "Inverted", value);
+            }
         };
-        let server = Server(Arc::new(Mutex::new(output)));
-        self.outputs.lock().await.push(server.0.clone());
-        instance.object_server().at(path, server).await?;
 
-        Ok(())
+        let output_clone = output.clone();
+        let get_inverted_output_cb =
+            move |_ctx: PropContext<State>| output_clone.borrow().color().inverted;
+
+        let output_clone = output.clone();
+        let set_inverted_output_cb = move |ctx: PropContext<State>, val: UnVariant| {
+            let global_color = ctx.state.color();
+
+            let mut output = output_clone.borrow_mut();
+            let color = output.color();
+            let inverted = val.get::<bool>().unwrap();
+
+            if color.inverted != inverted {
+                output.set_color(Color { inverted, ..color });
+
+                let value = inverted.into();
+                signal_change(&mut ctx.conn.send, ctx.object_path, "Inverted", value);
+
+                if ctx.state.color().inverted != global_color.inverted {
+                    let value = inverted.into();
+                    signal_change(&mut ctx.conn.send, "/", "Inverted", value);
+                }
+            }
+        };
+
+        let output_clone = output.clone();
+        let update_brightness_output_cb =
+            move |ctx: &mut MethodContext<State>, args: UpdateBrightnessArgs| {
+                let global_color = ctx.state.color();
+
+                let output = output_clone.borrow_mut();
+                let color = output.color();
+                let brightness = (color.brightness + args.delta).clamp(0.0, 1.0);
+
+                if color.brightness != brightness {
+                    let value = brightness.into();
+                    signal_change(&mut ctx.conn.send, ctx.object_path, "Brightness", value);
+
+                    let brightness = ctx.state.color().brightness;
+                    if brightness != global_color.brightness {
+                        let value = brightness.into();
+                        signal_change(&mut ctx.conn.send, "/", "Brightness", value);
+                    }
+                }
+            };
+
+        let output_clone = output.clone();
+        let get_brightness_output_cb =
+            move |_ctx: PropContext<State>| output_clone.borrow().color().brightness;
+
+        let output_clone = output.clone();
+        let set_brightness_output_cb = move |ctx: PropContext<State>, val: UnVariant| {
+            let global_color = ctx.state.color();
+
+            let output = output_clone.borrow_mut();
+            let color = output.color();
+            let brightness = val.get::<f64>().unwrap().clamp(0.0, 1.0);
+
+            if color.brightness != brightness {
+                let value = brightness.into();
+                signal_change(&mut ctx.conn.send, ctx.object_path, "Brightness", value);
+
+                let brightness = ctx.state.color().brightness;
+                if brightness != global_color.brightness {
+                    let value = brightness.into();
+                    signal_change(&mut ctx.conn.send, "/", "Brightness", value);
+                }
+            }
+        };
+
+        let output_clone = output.clone();
+        let update_temperature_output_cb =
+            move |ctx: &mut MethodContext<State>, args: UpdateTemperatureArgs| {
+                let global_color = ctx.state.color();
+
+                let output = output_clone.borrow_mut();
+                let color = output.color();
+                let temp = (color.temp as i16 + args.delta).clamp(1_000, 10_000) as u16;
+
+                if color.temp != temp {
+                    let value = temp.into();
+                    signal_change(&mut ctx.conn.send, ctx.object_path, "Temperature", value);
+
+                    let temp = ctx.state.color().temp;
+                    if temp != global_color.temp {
+                        let value = temp.into();
+                        signal_change(&mut ctx.conn.send, "/", "Temperature", value);
+                    }
+                }
+            };
+
+        let output_clone = output.clone();
+        let get_temperature_output_cb =
+            move |_ctx: PropContext<State>| output_clone.borrow().color().temp;
+
+        let output_clone = output.clone();
+        let set_temperature_output_cb = move |ctx: PropContext<State>, val: UnVariant| {
+            let global_color = ctx.state.color();
+
+            let output = output_clone.borrow_mut();
+            let color = output.color();
+            let temp = val.get::<u16>().unwrap().clamp(1_000, 10_000);
+
+            if color.temp != temp {
+                let value = temp.into();
+                signal_change(&mut ctx.conn.send, ctx.object_path, "Temperature", value);
+
+                let temp = ctx.state.color().temp;
+                if temp != global_color.temp {
+                    let value = temp.into();
+                    signal_change(&mut ctx.conn.send, "/", "Temperature", value);
+                }
+            }
+        };
+
+        let output_clone = output.clone();
+        let update_gamma_output_cb =
+            move |ctx: &mut MethodContext<State>, args: UpdateGammaArgs| {
+                let global_color = ctx.state.color();
+
+                let output = output_clone.borrow_mut();
+                let color = output.color();
+                let gamma = (color.gamma + args.delta).max(0.1);
+
+                if color.gamma != gamma {
+                    let value = gamma.into();
+                    signal_change(&mut ctx.conn.send, ctx.object_path, "Gamma", value);
+
+                    let gamma = ctx.state.color().gamma;
+                    if gamma != global_color.gamma {
+                        let value = gamma.into();
+                        signal_change(&mut ctx.conn.send, "/", "Gamma", value);
+                    }
+                }
+            };
+
+        let output_clone = output.clone();
+        let get_gamma_output_cb =
+            move |_ctx: PropContext<State>| output_clone.borrow().color().gamma;
+
+        let output_clone = output.clone();
+        let set_gamma_output_cb = move |ctx: PropContext<State>, val: UnVariant| {
+            let global_color = ctx.state.color();
+
+            let output = output_clone.borrow_mut();
+            let color = output.color();
+            let gamma = val.get::<f64>().unwrap().max(0.1);
+
+            if color.gamma != gamma {
+                let value = gamma.into();
+                signal_change(&mut ctx.conn.send, ctx.object_path, "Gamma", value);
+
+                let gamma = ctx.state.color().gamma;
+                if gamma != global_color.gamma {
+                    let value = gamma.into();
+                    signal_change(&mut ctx.conn.send, "/", "Gamma", value);
+                }
+            }
+        };
+
+        let gammarelay_output_iface = InterfaceImp::new("rs.wl.gammarelay")
+            .with_method::<(), ()>("ToggleInverted", toggle_inverted_output_cb)
+            .with_method::<UpdateTemperatureArgs, ()>(
+                "UpdateTemperature",
+                update_temperature_output_cb,
+            )
+            .with_method::<UpdateGammaArgs, ()>("UpdateGamma", update_gamma_output_cb)
+            .with_method::<UpdateBrightnessArgs, ()>(
+                "UpdateBrightness",
+                update_brightness_output_cb,
+            )
+            .with_prop(
+                "Inverted",
+                Access::ReadWrite(get_inverted_output_cb, set_inverted_output_cb),
+            )
+            .with_prop(
+                "Temperature",
+                Access::ReadWrite(get_temperature_output_cb, set_temperature_output_cb),
+            )
+            .with_prop(
+                "Gamma",
+                Access::ReadWrite(get_gamma_output_cb, set_gamma_output_cb),
+            )
+            .with_prop(
+                "Brightness",
+                Access::ReadWrite(get_brightness_output_cb, set_brightness_output_cb),
+            );
+
+        let mut object = rustbus_service::Object::new();
+        object.add_interface(gammarelay_output_iface);
+
+        let outputs_object = self
+            .service
+            .get_object_mut("/outputs")
+            .expect("object /outputs not found");
+        outputs_object.add_child(output.borrow().name().replace('-', "_"), object);
     }
 
-    pub async fn remove_output(
-        &self,
-        instance: &mut Connection,
-        output_name: String,
-    ) -> Result<()> {
-        let mut outputs = self.outputs.lock().await;
-        let mut output_index = None;
-        for (index, output) in outputs.iter().enumerate() {
-            if output.lock().await.output_name == output_name {
-                output_index = Some(index);
-                break;
-            }
-        }
-        if let Some(index) = output_index {
-            outputs.remove(index);
-            let path = format!("/outputs/{}", output_name.replace('-', "_"));
-            instance.object_server().remove::<Server, _>(path).await?;
-        }
+    pub fn remove_output(&mut self, name: &str) {
+        todo!();
+    }
 
+    pub fn poll(&mut self, state: &mut State) -> Result<()> {
+        self.service.run(&mut self.conn, state, Timeout::Nonblock)?;
         Ok(())
     }
 }
 
-#[dbus_interface(name = "rs.wl.gammarelay")]
-impl RootServer {
-    #[dbus_interface(property)]
-    async fn temperature(&self) -> u16 {
-        let outputs = self.outputs.lock().await;
-        let mut temp_sum = 0;
-        for output in outputs.iter() {
-            let output = output.lock().await;
-            temp_sum += output.color.temp;
-        }
-        temp_sum / outputs.len() as u16
-    }
+fn toggle_inverted_root_cb(ctx: &mut MethodContext<State>, _args: ()) {
+    let inverted = !ctx.state.color().inverted;
+    ctx.state.set_inverted(inverted);
 
-    #[dbus_interface(property)]
-    async fn set_temperature(&mut self, temp: u16) -> Result<(), zbus::fdo::Error> {
-        if (1000..=10000).contains(&temp) {
-            let outputs = self.outputs.lock().await;
-            for output in outputs.iter() {
-                let mut output = output.lock().await;
-                output.color.temp = temp;
-                output.send_color().await;
-            }
-            Ok(())
-        } else {
-            Err(zbus::fdo::Error::InvalidArgs(
-                "temperature must be in range [1000,10000]".into(),
-            ))
-        }
-    }
+    let sig = prop_changed_message(
+        ctx.object_path,
+        "rs.wl.gammarelay",
+        "Inverted",
+        inverted.into(),
+    );
+    ctx.conn.send.send_message_write_all(&sig).unwrap();
+}
 
-    async fn update_temperature(
-        &mut self,
-        #[zbus(signal_context)] cx: zbus::SignalContext<'_>,
-        delta_temp: i16,
-    ) -> Result<(), zbus::fdo::Error> {
-        {
-            let outputs = self.outputs.lock().await;
-            for output in outputs.iter() {
-                let mut output = output.lock().await;
-                output.color.temp =
-                    (output.color.temp as i16 + delta_temp).clamp(1_000, 10_000) as _;
-                output.send_color().await;
-            }
-        }
-        self.temperature_changed(&cx).await?;
-        Ok(())
-    }
+fn get_inverted_root_cb(ctx: PropContext<State>) -> bool {
+    ctx.state.color().inverted
+}
 
-    #[dbus_interface(property)]
-    async fn gamma(&self) -> f64 {
-        let outputs = self.outputs.lock().await;
-        let mut gamma_sum = 0.0;
-        for output in outputs.iter() {
-            let output = output.lock().await;
-            gamma_sum += output.color.gamma;
-        }
-        gamma_sum / outputs.len() as f64
-    }
+fn set_inverted_root_cb(ctx: PropContext<State>, val: UnVariant) {
+    let val = val.get::<bool>().unwrap();
+    if ctx.state.color().inverted != val {
+        ctx.state.set_inverted(val);
 
-    #[dbus_interface(property)]
-    async fn set_gamma(&mut self, gamma: f64) -> Result<(), zbus::fdo::Error> {
-        if gamma > 0.0 {
-            let outputs = self.outputs.lock().await;
-            for output in outputs.iter() {
-                let mut output = output.lock().await;
-                output.color.gamma = gamma;
-                output.send_color().await;
-            }
-            Ok(())
-        } else {
-            Err(zbus::fdo::Error::InvalidArgs(
-                "gamma must be greater than zero".into(),
-            ))
-        }
+        let sig = prop_changed_message(ctx.object_path, "rs.wl.gammarelay", ctx.name, val.into());
+        ctx.conn.send.send_message_write_all(&sig).unwrap();
     }
+}
 
-    async fn update_gamma(
-        &mut self,
-        #[zbus(signal_context)] cx: zbus::SignalContext<'_>,
-        delta_gamma: f64,
-    ) -> Result<(), zbus::fdo::Error> {
-        {
-            let outputs = self.outputs.lock().await;
-            for output in outputs.iter() {
-                let mut output = output.lock().await;
-                output.color.gamma = (output.color.gamma + delta_gamma).max(0.0);
-                output.send_color().await;
-            }
-        }
-        self.gamma_changed(&cx).await?;
-        Ok(())
-    }
+#[derive(rustbus_service::Args)]
+struct UpdateBrightnessArgs {
+    delta: f64,
+}
 
-    #[dbus_interface(property)]
-    async fn brightness(&self) -> f64 {
-        let outputs = self.outputs.lock().await;
-        let mut brightness_sum = 0.0;
-        for output in outputs.iter() {
-            let output = output.lock().await;
-            brightness_sum += output.color.brightness;
-        }
-        brightness_sum / outputs.len() as f64
-    }
+fn update_brightness_root_cb(ctx: &mut MethodContext<State>, args: UpdateBrightnessArgs) {
+    let updated = ctx.state.update_brightness(args.delta);
 
-    #[dbus_interface(property)]
-    async fn set_brightness(&mut self, brightness: f64) -> Result<(), zbus::fdo::Error> {
-        if (0.0..=1.0).contains(&brightness) {
-            let outputs = self.outputs.lock().await;
-            for output in outputs.iter() {
-                let mut output = output.lock().await;
-                output.color.brightness = brightness;
-                output.send_color().await;
-            }
-            Ok(())
-        } else {
-            Err(zbus::fdo::Error::InvalidArgs(
-                "brightness must be in range [0,1]".into(),
-            ))
-        }
+    if updated {
+        let sig = prop_changed_message(
+            ctx.object_path,
+            "rs.wl.gammarelay",
+            "Brightness",
+            ctx.state.color().brightness.into(),
+        );
+        ctx.conn.send.send_message_write_all(&sig).unwrap();
     }
+}
 
-    async fn update_brightness(
-        &mut self,
-        #[zbus(signal_context)] cx: zbus::SignalContext<'_>,
-        delta_brightness: f64,
-    ) -> Result<(), zbus::fdo::Error> {
-        {
-            let outputs = self.outputs.lock().await;
-            for output in outputs.iter() {
-                let mut output = output.lock().await;
-                output.color.brightness =
-                    (output.color.brightness + delta_brightness).clamp(0.0, 1.0);
-                output.send_color().await;
-            }
-        }
-        self.brightness_changed(&cx).await?;
-        Ok(())
-    }
+fn get_brightness_root_cb(ctx: PropContext<State>) -> f64 {
+    ctx.state.color().brightness
+}
 
-    #[dbus_interface(property)]
-    async fn inverted(&self) -> bool {
-        let outputs = self.outputs.lock().await;
-        let mut all_inverted = true;
-        for output in outputs.iter() {
-            let output = output.lock().await;
-            all_inverted &= output.color.inverted;
-            if !all_inverted {
-                break;
-            }
-        }
-        all_inverted
-    }
+fn set_brightness_root_cb(ctx: PropContext<State>, val: UnVariant) {
+    let val = val.get::<f64>().unwrap().clamp(0.0, 1.0);
+    if ctx.state.color().brightness != val {
+        ctx.state.set_brightness(val);
 
-    #[dbus_interface(property)]
-    async fn set_inverted(&mut self, value: bool) {
-        let outputs = self.outputs.lock().await;
-        for output in outputs.iter() {
-            let mut output = output.lock().await;
-            output.color.inverted = value;
-            output.send_color().await;
-        }
+        let sig = prop_changed_message(ctx.object_path, "rs.wl.gammarelay", ctx.name, val.into());
+        ctx.conn.send.send_message_write_all(&sig).unwrap();
     }
+}
 
-    async fn toggle_inverted(
-        &mut self,
-        #[zbus(signal_context)] cx: zbus::SignalContext<'_>,
-    ) -> Result<(), zbus::fdo::Error> {
-        let inverted = self.inverted().await;
-        {
-            let outputs = self.outputs.lock().await;
-            for output in outputs.iter() {
-                let mut output = output.lock().await;
-                output.color.inverted = !inverted;
-                output.send_color().await;
-            }
-        }
-        self.brightness_changed(&cx).await?;
-        Ok(())
+#[derive(rustbus_service::Args)]
+struct UpdateTemperatureArgs {
+    delta: i16,
+}
+
+fn update_temperature_root_cb(ctx: &mut MethodContext<State>, args: UpdateTemperatureArgs) {
+    let updated = ctx.state.update_temperature(args.delta);
+
+    if updated {
+        let sig = prop_changed_message(
+            ctx.object_path,
+            "rs.wl.gammarelay",
+            "Temperature",
+            ctx.state.color().temp.into(),
+        );
+        ctx.conn.send.send_message_write_all(&sig).unwrap();
     }
+}
+
+fn get_temperature_root_cb(ctx: PropContext<State>) -> u16 {
+    ctx.state.color().temp
+}
+
+fn set_temperature_root_cb(ctx: PropContext<State>, val: UnVariant) {
+    let val = val.get::<u16>().unwrap().clamp(1_000, 10_000);
+    if ctx.state.color().temp != val {
+        ctx.state.set_temperature(val);
+
+        let sig = prop_changed_message(ctx.object_path, "rs.wl.gammarelay", ctx.name, val.into());
+        ctx.conn.send.send_message_write_all(&sig).unwrap();
+    }
+}
+
+#[derive(rustbus_service::Args)]
+struct UpdateGammaArgs {
+    delta: f64,
+}
+
+fn update_gamma_root_cb(ctx: &mut MethodContext<State>, args: UpdateGammaArgs) {
+    let updated = ctx.state.update_gamma(args.delta);
+
+    if updated {
+        let sig = prop_changed_message(
+            ctx.object_path,
+            "rs.wl.gammarelay",
+            "Gamma",
+            ctx.state.color().gamma.into(),
+        );
+        ctx.conn.send.send_message_write_all(&sig).unwrap();
+    }
+}
+
+fn get_gamma_root_cb(ctx: PropContext<State>) -> f64 {
+    ctx.state.color().gamma
+}
+
+fn set_gamma_root_cb(ctx: PropContext<State>, val: UnVariant) {
+    let val = val.get::<f64>().unwrap().max(0.1);
+    if ctx.state.color().gamma != val {
+        ctx.state.set_gamma(val);
+
+        let sig = prop_changed_message(ctx.object_path, "rs.wl.gammarelay", ctx.name, val.into());
+        ctx.conn.send.send_message_write_all(&sig).unwrap();
+    }
+}
+
+fn prop_changed_message(path: &str, iface: &str, prop: &str, value: Param) -> MarshalledMessage {
+    let mut map = HashMap::new();
+    map.insert(
+        prop,
+        Variant {
+            sig: value.sig(),
+            value,
+        },
+    );
+
+    let mut sig = MessageBuilder::new()
+        .signal("org.freedesktop.DBus.Properties", "PropertiesChanged", path)
+        .build();
+    sig.body.push_param(iface).unwrap();
+    sig.body.push_param(map).unwrap();
+    sig.body.push_param::<&[&str]>(&[]).unwrap();
+    sig
+}
+
+fn signal_change(send: &mut rustbus::SendConn, path: &str, prop: &str, value: Param) {
+    let output_sig = prop_changed_message(path, "rs.wl.gammarelay", prop, value);
+    send.send_message_write_all(&output_sig).unwrap();
 }

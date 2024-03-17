@@ -1,5 +1,5 @@
 use wayrs_client::protocol::*;
-use wayrs_client::EventCtx;
+use wayrs_client::{EventCtx, IoMode};
 use wayrs_protocols::wlr_gamma_control_unstable_v1::*;
 
 use anyhow::Result;
@@ -9,88 +9,76 @@ use wayrs_client::global::*;
 use wayrs_client::proxy::Proxy;
 use wayrs_client::Connection;
 
-use std::fs::File;
-use std::os::unix::io::FromRawFd;
-
-use tokio::sync::mpsc;
+use std::cell::RefCell;
+use std::io::ErrorKind;
+use std::os::fd::{AsRawFd, RawFd};
+use std::rc::Rc;
 
 use crate::color::{colorramp_fill, Color};
-use crate::dbus_server::RootServer;
+use crate::dbus_server::DbusServer;
+use crate::State;
 
-#[derive(Debug)]
-pub enum Request {
-    SetColor { color: Color, output_name: String },
+pub struct Wayland {
+    conn: Connection<State>,
 }
 
-pub async fn run(
-    mut rx: mpsc::Receiver<Request>,
-    tx: mpsc::Sender<Request>,
-    mut instance: zbus::Connection,
-    root_server: RootServer,
-) -> Result<()> {
-    let (mut conn, globals) = Connection::async_connect_and_collect_globals().await?;
-    conn.add_registry_cb(wl_registry_cb);
+impl AsRawFd for Wayland {
+    fn as_raw_fd(&self) -> RawFd {
+        self.conn.as_raw_fd()
+    }
+}
 
-    let gamma_manager = globals.bind(&mut conn, 1)?;
+impl Wayland {
+    pub fn new(dbus_server: Rc<RefCell<DbusServer>>) -> Result<(Self, State)> {
+        let (mut conn, globals) = Connection::connect_and_collect_globals()?;
+        conn.add_registry_cb(wl_registry_cb);
 
-    let outputs = globals
-        .iter()
-        .filter(|g| g.is::<WlOutput>())
-        .map(|output| Output::bind(&mut conn, output, gamma_manager))
-        .collect();
+        let gamma_manager = globals.bind(&mut conn, 1)?;
 
-    let mut state = State {
-        color: Default::default(),
-        outputs,
-        gamma_manager,
-        new_output_names: Vec::new(),
-        output_names_to_delete: Vec::new(),
-    };
+        let outputs = globals
+            .iter()
+            .filter(|g| g.is::<WlOutput>())
+            .map(|output| Rc::new(RefCell::new(Output::bind(&mut conn, output, gamma_manager))))
+            .collect();
 
-    loop {
-        conn.async_flush().await?;
+        let state = State {
+            outputs,
+            gamma_manager,
+            dbus_server,
+        };
 
-        tokio::select! {
-            recv_events = conn.async_recv_events() => {
-                recv_events?;
-                conn.dispatch_events(&mut state);
-                while let Some(output_name) = state.new_output_names.pop() {
-                    root_server.add_output(&mut instance, tx.clone(), output_name).await?;
-                }
-                while let Some(output_name) = state.output_names_to_delete.pop() {
-                    root_server.remove_output(&mut instance, output_name).await?;
-                }
-            }
-            Some(request) = rx.recv() => {
-                let Request::SetColor { color, output_name } = request;
-                state.color = color;
-                state
-                    .outputs
-                    .iter_mut()
-                    .filter(|o| o.name.as_ref() == Some(&output_name))
-                    .try_for_each(|o| o.set_color(&mut conn, color))?;
+        conn.flush(IoMode::Blocking)?;
+
+        Ok((Self { conn }, state))
+    }
+
+    pub fn poll(&mut self, state: &mut State) -> Result<()> {
+        match self.conn.recv_events(IoMode::NonBlocking) {
+            Ok(()) => self.conn.dispatch_events(state),
+            Err(e) if e.kind() == ErrorKind::WouldBlock => (),
+            Err(e) => return Err(e.into()),
+        }
+
+        for output in &state.outputs {
+            let mut output = output.borrow_mut();
+            if output.color_changed {
+                output.update_displayed_color(&mut self.conn)?;
             }
         }
+        self.conn.flush(IoMode::Blocking)?;
+        Ok(())
     }
 }
 
 #[derive(Debug)]
-struct State {
-    color: Color,
-    outputs: Vec<Output>,
-    gamma_manager: ZwlrGammaControlManagerV1,
-    new_output_names: Vec<String>,
-    output_names_to_delete: Vec<String>,
-}
-
-#[derive(Debug)]
-struct Output {
+pub struct Output {
     reg_name: u32,
     wl: WlOutput,
     name: Option<String>,
     color: Color,
     gamma_control: ZwlrGammaControlV1,
     ramp_size: usize,
+    color_changed: bool,
 }
 
 impl Output {
@@ -108,6 +96,7 @@ impl Output {
             color: Default::default(),
             gamma_control: gamma_manager.get_gamma_control_with_cb(conn, output, gamma_control_cb),
             ramp_size: 0,
+            color_changed: true,
         }
     }
 
@@ -119,20 +108,46 @@ impl Output {
         }
     }
 
-    fn set_color(&mut self, conn: &mut Connection<State>, color: Color) -> Result<()> {
+    pub fn reg_name(&self) -> u32 {
+        self.reg_name
+    }
+
+    pub fn name(&self) -> &str {
+        self.name.as_ref().unwrap()
+    }
+
+    pub fn color(&self) -> Color {
+        self.color
+    }
+
+    pub fn color_changed(&self) -> bool {
+        self.color_changed
+    }
+
+    pub fn set_color(&mut self, color: Color) {
         if self.ramp_size == 0 || color == self.color {
-            return Ok(());
+            return;
         }
 
         self.color = color;
-        let fd = shmemfdrs::create_shmem(cstr!("/ramp-buffer"), self.ramp_size * 6);
-        let file = unsafe { File::from_raw_fd(fd) };
+        self.color_changed = true;
+    }
+
+    fn update_displayed_color(&mut self, conn: &mut Connection<State>) -> Result<()> {
+        if self.ramp_size == 0 {
+            return Ok(());
+        }
+
+        let file = shmemfdrs2::create_shmem(cstr!("/ramp-buffer"))?;
+        file.set_len(self.ramp_size as u64 * 6)?;
         let mut mmap = unsafe { memmap2::MmapMut::map_mut(&file)? };
         let buf = bytemuck::cast_slice_mut::<u8, u16>(&mut mmap);
         let (r, rest) = buf.split_at_mut(self.ramp_size);
         let (g, b) = rest.split_at_mut(self.ramp_size);
         colorramp_fill(r, g, b, self.ramp_size, self.color);
         self.gamma_control.set_gamma(conn, file.into());
+
+        self.color_changed = false;
         Ok(())
     }
 }
@@ -141,16 +156,21 @@ fn wl_registry_cb(conn: &mut Connection<State>, state: &mut State, event: &wl_re
     match event {
         wl_registry::Event::Global(global) if global.is::<WlOutput>() => {
             let mut output = Output::bind(conn, global, state.gamma_manager);
-            output.set_color(conn, state.color).unwrap();
-            state.outputs.push(output);
+            output.set_color(state.color());
+            output.update_displayed_color(conn).unwrap();
+            state.outputs.push(Rc::new(RefCell::new(output)));
         }
         wl_registry::Event::GlobalRemove(name) => {
-            if let Some(output_index) = state.outputs.iter().position(|o| o.reg_name == *name) {
+            if let Some(output_index) = state
+                .outputs
+                .iter()
+                .position(|o| o.borrow().reg_name == *name)
+            {
+                if let Some(output_name) = &state.outputs[output_index].borrow().name {
+                    state.dbus_server.borrow_mut().remove_output(&output_name);
+                }
                 let output = state.outputs.swap_remove(output_index);
-                state
-                    .output_names_to_delete
-                    .push(output.name.clone().unwrap());
-                output.destroy(conn);
+                Rc::into_inner(output).unwrap().into_inner().destroy(conn);
             }
         }
         _ => (),
@@ -162,19 +182,31 @@ fn gamma_control_cb(ctx: EventCtx<State, ZwlrGammaControlV1>) {
         .state
         .outputs
         .iter()
-        .position(|o| o.gamma_control == ctx.proxy)
+        .position(|o| o.borrow().gamma_control == ctx.proxy)
         .expect("Received event for unknown output");
     match ctx.event {
         zwlr_gamma_control_v1::Event::GammaSize(size) => {
-            let output = &mut ctx.state.outputs[output_index];
+            let mut output = ctx.state.outputs[output_index].borrow_mut();
             eprintln!("Output {}: ramp_size = {}", output.reg_name, size);
             output.ramp_size = size as usize;
-            output.set_color(ctx.conn, ctx.state.color).unwrap();
+            output.update_displayed_color(ctx.conn).unwrap();
         }
         zwlr_gamma_control_v1::Event::Failed => {
             let output = ctx.state.outputs.swap_remove(output_index);
-            eprintln!("Output {}: gamma_control::Event::Failed", output.reg_name);
-            output.destroy(ctx.conn);
+            eprintln!(
+                "Output {}: gamma_control::Event::Failed",
+                output.borrow().reg_name
+            );
+            if let Some(output_name) = &output.borrow().name {
+                ctx.state
+                    .dbus_server
+                    .borrow_mut()
+                    .remove_output(&output_name);
+            }
+            Rc::into_inner(output)
+                .unwrap()
+                .into_inner()
+                .destroy(ctx.conn);
         }
         _ => (),
     }
@@ -185,12 +217,15 @@ fn wl_output_cb(ctx: EventCtx<State, WlOutput>) {
         let output = ctx
             .state
             .outputs
-            .iter_mut()
-            .find(|o| o.wl == ctx.proxy)
+            .iter()
+            .find(|o| o.borrow().wl == ctx.proxy)
             .unwrap();
         let name = String::from_utf8(name.into_bytes()).expect("invalid output name");
-        eprintln!("Output {}: name = {name:?}", output.reg_name);
-        ctx.state.new_output_names.push(name.clone());
-        output.name = Some(name);
+        eprintln!("Output {}: name = {name:?}", output.borrow().reg_name);
+        output.borrow_mut().name = Some(name);
+        ctx.state
+            .dbus_server
+            .borrow_mut()
+            .add_output(output.clone());
     }
 }

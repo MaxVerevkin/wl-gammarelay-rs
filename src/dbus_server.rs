@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::os::fd::{AsRawFd, RawFd};
 
 use crate::color::Color;
-use crate::State;
+use crate::WaylandState;
 use anyhow::Result;
 use rustbus::{
     connection::Timeout,
@@ -17,7 +17,7 @@ use rustbus_service::{Access, InterfaceImp, MethodContext, PropContext, Service}
 
 pub struct DbusServer {
     conn: DuplexConn,
-    service: Service<State>,
+    service: Service<WaylandState>,
 }
 
 impl AsRawFd for DbusServer {
@@ -79,7 +79,7 @@ impl DbusServer {
     }
 
     pub fn add_output(&mut self, reg_name: u32, name: &str) {
-        let toggle_inverted_output_cb = move |ctx: &mut MethodContext<State>, _args: ()| {
+        let toggle_inverted_output_cb = move |ctx: &mut MethodContext<WaylandState>, _args: ()| {
             let global_color = ctx.state.color();
 
             let output = ctx.state.mut_output_by_reg_name(reg_name).unwrap();
@@ -96,7 +96,7 @@ impl DbusServer {
             }
         };
 
-        let get_inverted_output_cb = move |ctx: PropContext<State>| {
+        let get_inverted_output_cb = move |ctx: PropContext<WaylandState>| {
             ctx.state
                 .output_by_reg_name(reg_name)
                 .unwrap()
@@ -104,7 +104,7 @@ impl DbusServer {
                 .inverted
         };
 
-        let set_inverted_output_cb = move |ctx: PropContext<State>, val: UnVariant| {
+        let set_inverted_output_cb = move |ctx: PropContext<WaylandState>, val: UnVariant| {
             let global_color = ctx.state.color();
 
             let output = ctx.state.mut_output_by_reg_name(reg_name).unwrap();
@@ -125,7 +125,7 @@ impl DbusServer {
         };
 
         let update_brightness_output_cb =
-            move |ctx: &mut MethodContext<State>, args: UpdateBrightnessArgs| {
+            move |ctx: &mut MethodContext<WaylandState>, args: UpdateBrightnessArgs| {
                 let global_color = ctx.state.color();
 
                 let output = ctx.state.mut_output_by_reg_name(reg_name).unwrap();
@@ -149,7 +149,7 @@ impl DbusServer {
                 }
             };
 
-        let get_brightness_output_cb = move |ctx: PropContext<State>| {
+        let get_brightness_output_cb = move |ctx: PropContext<WaylandState>| {
             ctx.state
                 .output_by_reg_name(reg_name)
                 .unwrap()
@@ -157,7 +157,7 @@ impl DbusServer {
                 .brightness
         };
 
-        let set_brightness_output_cb = move |ctx: PropContext<State>, val: UnVariant| {
+        let set_brightness_output_cb = move |ctx: PropContext<WaylandState>, val: UnVariant| {
             let global_color = ctx.state.color();
 
             let output = ctx.state.mut_output_by_reg_name(reg_name).unwrap();
@@ -182,7 +182,7 @@ impl DbusServer {
         };
 
         let update_temperature_output_cb =
-            move |ctx: &mut MethodContext<State>, args: UpdateTemperatureArgs| {
+            move |ctx: &mut MethodContext<WaylandState>, args: UpdateTemperatureArgs| {
                 let global_color = ctx.state.color();
 
                 let output = ctx.state.mut_output_by_reg_name(reg_name).unwrap();
@@ -203,11 +203,11 @@ impl DbusServer {
                 }
             };
 
-        let get_temperature_output_cb = move |ctx: PropContext<State>| {
+        let get_temperature_output_cb = move |ctx: PropContext<WaylandState>| {
             ctx.state.output_by_reg_name(reg_name).unwrap().color().temp
         };
 
-        let set_temperature_output_cb = move |ctx: PropContext<State>, val: UnVariant| {
+        let set_temperature_output_cb = move |ctx: PropContext<WaylandState>, val: UnVariant| {
             let global_color = ctx.state.color();
 
             let output = ctx.state.mut_output_by_reg_name(reg_name).unwrap();
@@ -229,7 +229,7 @@ impl DbusServer {
         };
 
         let update_gamma_output_cb =
-            move |ctx: &mut MethodContext<State>, args: UpdateGammaArgs| {
+            move |ctx: &mut MethodContext<WaylandState>, args: UpdateGammaArgs| {
                 let global_color = ctx.state.color();
 
                 let output = ctx.state.mut_output_by_reg_name(reg_name).unwrap();
@@ -250,7 +250,7 @@ impl DbusServer {
                 }
             };
 
-        let get_gamma_output_cb = move |ctx: PropContext<State>| {
+        let get_gamma_output_cb = move |ctx: PropContext<WaylandState>| {
             ctx.state
                 .output_by_reg_name(reg_name)
                 .unwrap()
@@ -258,7 +258,7 @@ impl DbusServer {
                 .gamma
         };
 
-        let set_gamma_output_cb = move |ctx: PropContext<State>, val: UnVariant| {
+        let set_gamma_output_cb = move |ctx: PropContext<WaylandState>, val: UnVariant| {
             let global_color = ctx.state.color();
 
             let output = ctx.state.mut_output_by_reg_name(reg_name).unwrap();
@@ -321,13 +321,13 @@ impl DbusServer {
         todo!();
     }
 
-    pub fn poll(&mut self, state: &mut State) -> Result<()> {
+    pub fn poll(&mut self, state: &mut WaylandState) -> Result<()> {
         self.service.run(&mut self.conn, state, Timeout::Nonblock)?;
         Ok(())
     }
 }
 
-fn toggle_inverted_root_cb(ctx: &mut MethodContext<State>, _args: ()) {
+fn toggle_inverted_root_cb(ctx: &mut MethodContext<WaylandState>, _args: ()) {
     let inverted = !ctx.state.color().inverted;
     ctx.state.set_inverted(inverted);
 
@@ -340,11 +340,11 @@ fn toggle_inverted_root_cb(ctx: &mut MethodContext<State>, _args: ()) {
     ctx.conn.send.send_message_write_all(&sig).unwrap();
 }
 
-fn get_inverted_root_cb(ctx: PropContext<State>) -> bool {
+fn get_inverted_root_cb(ctx: PropContext<WaylandState>) -> bool {
     ctx.state.color().inverted
 }
 
-fn set_inverted_root_cb(ctx: PropContext<State>, val: UnVariant) {
+fn set_inverted_root_cb(ctx: PropContext<WaylandState>, val: UnVariant) {
     let val = val.get::<bool>().unwrap();
     if ctx.state.color().inverted != val {
         ctx.state.set_inverted(val);
@@ -359,7 +359,7 @@ struct UpdateBrightnessArgs {
     delta: f64,
 }
 
-fn update_brightness_root_cb(ctx: &mut MethodContext<State>, args: UpdateBrightnessArgs) {
+fn update_brightness_root_cb(ctx: &mut MethodContext<WaylandState>, args: UpdateBrightnessArgs) {
     let updated = ctx.state.update_brightness(args.delta);
 
     if updated {
@@ -373,11 +373,11 @@ fn update_brightness_root_cb(ctx: &mut MethodContext<State>, args: UpdateBrightn
     }
 }
 
-fn get_brightness_root_cb(ctx: PropContext<State>) -> f64 {
+fn get_brightness_root_cb(ctx: PropContext<WaylandState>) -> f64 {
     ctx.state.color().brightness
 }
 
-fn set_brightness_root_cb(ctx: PropContext<State>, val: UnVariant) {
+fn set_brightness_root_cb(ctx: PropContext<WaylandState>, val: UnVariant) {
     let val = val.get::<f64>().unwrap().clamp(0.0, 1.0);
     if ctx.state.color().brightness != val {
         ctx.state.set_brightness(val);
@@ -392,7 +392,7 @@ struct UpdateTemperatureArgs {
     delta: i16,
 }
 
-fn update_temperature_root_cb(ctx: &mut MethodContext<State>, args: UpdateTemperatureArgs) {
+fn update_temperature_root_cb(ctx: &mut MethodContext<WaylandState>, args: UpdateTemperatureArgs) {
     let updated = ctx.state.update_temperature(args.delta);
 
     if updated {
@@ -406,11 +406,11 @@ fn update_temperature_root_cb(ctx: &mut MethodContext<State>, args: UpdateTemper
     }
 }
 
-fn get_temperature_root_cb(ctx: PropContext<State>) -> u16 {
+fn get_temperature_root_cb(ctx: PropContext<WaylandState>) -> u16 {
     ctx.state.color().temp
 }
 
-fn set_temperature_root_cb(ctx: PropContext<State>, val: UnVariant) {
+fn set_temperature_root_cb(ctx: PropContext<WaylandState>, val: UnVariant) {
     let val = val.get::<u16>().unwrap().clamp(1_000, 10_000);
     if ctx.state.color().temp != val {
         ctx.state.set_temperature(val);
@@ -425,7 +425,7 @@ struct UpdateGammaArgs {
     delta: f64,
 }
 
-fn update_gamma_root_cb(ctx: &mut MethodContext<State>, args: UpdateGammaArgs) {
+fn update_gamma_root_cb(ctx: &mut MethodContext<WaylandState>, args: UpdateGammaArgs) {
     let updated = ctx.state.update_gamma(args.delta);
 
     if updated {
@@ -439,11 +439,11 @@ fn update_gamma_root_cb(ctx: &mut MethodContext<State>, args: UpdateGammaArgs) {
     }
 }
 
-fn get_gamma_root_cb(ctx: PropContext<State>) -> f64 {
+fn get_gamma_root_cb(ctx: PropContext<WaylandState>) -> f64 {
     ctx.state.color().gamma
 }
 
-fn set_gamma_root_cb(ctx: PropContext<State>, val: UnVariant) {
+fn set_gamma_root_cb(ctx: PropContext<WaylandState>, val: UnVariant) {
     let val = val.get::<f64>().unwrap().max(0.1);
     if ctx.state.color().gamma != val {
         ctx.state.set_gamma(val);

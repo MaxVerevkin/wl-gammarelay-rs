@@ -3,9 +3,8 @@ mod dbus_client;
 mod dbus_server;
 mod wayland;
 
-use std::cell::RefCell;
+use std::io;
 use std::os::fd::AsRawFd;
-use std::{io, rc::Rc};
 
 use clap::{Parser, Subcommand};
 use dbus_server::DbusServer;
@@ -28,13 +27,17 @@ enum Command {
     Watch { format: String },
 }
 
-struct State {
+pub struct WaylandState {
     outputs: Vec<wayland::Output>,
     gamma_manager: ZwlrGammaControlManagerV1,
-    dbus_server: Rc<RefCell<DbusServer>>,
 }
 
-impl State {
+pub struct State {
+    pub wayland_state: WaylandState,
+    pub dbus_server: DbusServer,
+}
+
+impl WaylandState {
     pub fn output_by_reg_name(&self, reg_name: u32) -> Option<&wayland::Output> {
         self.outputs
             .iter()
@@ -165,21 +168,21 @@ fn main() -> anyhow::Result<()> {
     match command {
         Command::Run => {
             if let Some(dbus_server) = dbus_server {
-                let dbus_server = Rc::new(RefCell::new(dbus_server));
-                let (mut wayland, mut state) = wayland::Wayland::new(dbus_server.clone())?;
+                let (mut wayland, wayland_state) = wayland::Wayland::new()?;
 
-                let mut fds = {
-                    let dbus_server = dbus_server.borrow().as_raw_fd();
-                    [pollin(&dbus_server), pollin(&wayland)]
+                let mut fds = [pollin(&dbus_server), pollin(&wayland)];
+                let mut state = State {
+                    wayland_state,
+                    dbus_server,
                 };
 
                 loop {
                     poll(&mut fds)?;
                     if fds[0].revents != 0 {
-                        dbus_server.borrow_mut().poll(&mut state)?;
+                        state.dbus_server.poll(&mut state.wayland_state)?;
                     }
-                    if fds[1].revents != 0 || state.color_changed() {
-                        wayland.poll(&mut state)?;
+                    if fds[1].revents != 0 || state.wayland_state.color_changed() {
+                        state = wayland.poll(state)?;
                     }
                 }
             } else {
@@ -189,21 +192,21 @@ fn main() -> anyhow::Result<()> {
         Command::Watch { format } => {
             let mut dbus_client = dbus_client::DbusClient::new(format, dbus_server.is_none())?;
             if let Some(dbus_server) = dbus_server {
-                let dbus_server = Rc::new(RefCell::new(dbus_server));
-                let (mut wayland, mut state) = wayland::Wayland::new(dbus_server.clone())?;
+                let (mut wayland, state) = wayland::Wayland::new()?;
 
-                let mut fds = {
-                    let dbus_server = dbus_server.borrow().as_raw_fd();
-                    [pollin(&dbus_server), pollin(&wayland), pollin(&dbus_client)]
+                let mut fds = [pollin(&dbus_server), pollin(&wayland), pollin(&dbus_client)];
+                let mut state = State {
+                    wayland_state: state,
+                    dbus_server,
                 };
 
                 loop {
                     poll(&mut fds)?;
                     if fds[0].revents != 0 {
-                        dbus_server.borrow_mut().poll(&mut state)?;
+                        state.dbus_server.poll(&mut state.wayland_state)?;
                     }
-                    if fds[1].revents != 0 || state.color_changed() {
-                        wayland.poll(&mut state)?;
+                    if fds[1].revents != 0 || state.wayland_state.color_changed() {
+                        state = wayland.poll(state)?;
                     }
                     if fds[2].revents != 0 {
                         dbus_client.run(false)?;

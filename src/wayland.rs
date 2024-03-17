@@ -222,10 +222,10 @@ fn wl_output_cb(ctx: EventCtx<State, WlOutput>) {
             .unwrap();
         let name = String::from_utf8(name.into_bytes()).expect("invalid output name");
         eprintln!("Output {}: name = {name:?}", output.borrow().reg_name);
+        output.borrow_mut().name = Some(name);
         ctx.state
             .dbus_server
             .borrow_mut()
             .add_output(output.clone());
-        output.borrow_mut().name = Some(name);
     }
 }

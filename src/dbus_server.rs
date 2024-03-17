@@ -81,10 +81,11 @@ impl DbusServer {
     }
 
     pub fn add_output(&mut self, output: Rc<RefCell<wayland::Output>>) {
-        let toggle_inverted_output_cb = |ctx: &mut MethodContext<State>, _args: ()| {
+        let output_clone = output.clone();
+        let toggle_inverted_output_cb = move |ctx: &mut MethodContext<State>, _args: ()| {
             let global_color = ctx.state.color();
 
-            let output = output.clone().borrow_mut();
+            let mut output = output_clone.borrow_mut();
             let color = output.color();
             let inverted = !color.inverted;
             output.set_color(Color { inverted, ..color });
@@ -98,12 +99,15 @@ impl DbusServer {
             }
         };
 
-        let get_inverted_output_cb = |ctx: PropContext<State>| output.borrow().color().inverted;
+        let output_clone = output.clone();
+        let get_inverted_output_cb =
+            move |_ctx: PropContext<State>| output_clone.borrow().color().inverted;
 
-        let set_inverted_output_cb = |ctx: PropContext<State>, val: UnVariant| {
+        let output_clone = output.clone();
+        let set_inverted_output_cb = move |ctx: PropContext<State>, val: UnVariant| {
             let global_color = ctx.state.color();
 
-            let output = output.borrow_mut();
+            let mut output = output_clone.borrow_mut();
             let color = output.color();
             let inverted = val.get::<bool>().unwrap();
 
@@ -120,11 +124,12 @@ impl DbusServer {
             }
         };
 
+        let output_clone = output.clone();
         let update_brightness_output_cb =
-            |ctx: &mut MethodContext<State>, args: UpdateBrightnessArgs| {
+            move |ctx: &mut MethodContext<State>, args: UpdateBrightnessArgs| {
                 let global_color = ctx.state.color();
 
-                let output = output.borrow_mut();
+                let output = output_clone.borrow_mut();
                 let color = output.color();
                 let brightness = (color.brightness + args.delta).clamp(0.0, 1.0);
 
@@ -140,12 +145,15 @@ impl DbusServer {
                 }
             };
 
-        let get_brightness_output_cb = |ctx: PropContext<State>| output.borrow().color().brightness;
+        let output_clone = output.clone();
+        let get_brightness_output_cb =
+            move |_ctx: PropContext<State>| output_clone.borrow().color().brightness;
 
-        let set_brightness_output_cb = |ctx: PropContext<State>, val: UnVariant| {
+        let output_clone = output.clone();
+        let set_brightness_output_cb = move |ctx: PropContext<State>, val: UnVariant| {
             let global_color = ctx.state.color();
 
-            let output = output.borrow_mut();
+            let output = output_clone.borrow_mut();
             let color = output.color();
             let brightness = val.get::<f64>().unwrap().clamp(0.0, 1.0);
 
@@ -161,11 +169,12 @@ impl DbusServer {
             }
         };
 
+        let output_clone = output.clone();
         let update_temperature_output_cb =
-            |ctx: &mut MethodContext<State>, args: UpdateTemperatureArgs| {
+            move |ctx: &mut MethodContext<State>, args: UpdateTemperatureArgs| {
                 let global_color = ctx.state.color();
 
-                let output = output.borrow_mut();
+                let output = output_clone.borrow_mut();
                 let color = output.color();
                 let temp = (color.temp as i16 + args.delta).clamp(1_000, 10_000) as u16;
 
@@ -181,12 +190,15 @@ impl DbusServer {
                 }
             };
 
-        let get_temperature_output_cb = |ctx: PropContext<State>| output.borrow().color().temp;
+        let output_clone = output.clone();
+        let get_temperature_output_cb =
+            move |_ctx: PropContext<State>| output_clone.borrow().color().temp;
 
-        let set_temperature_output_cb = |ctx: PropContext<State>, val: UnVariant| {
+        let output_clone = output.clone();
+        let set_temperature_output_cb = move |ctx: PropContext<State>, val: UnVariant| {
             let global_color = ctx.state.color();
 
-            let output = output.borrow_mut();
+            let output = output_clone.borrow_mut();
             let color = output.color();
             let temp = val.get::<u16>().unwrap().clamp(1_000, 10_000);
 
@@ -202,31 +214,36 @@ impl DbusServer {
             }
         };
 
-        let update_gamma_output_cb = |ctx: &mut MethodContext<State>, args: UpdateGammaArgs| {
-            let global_color = ctx.state.color();
+        let output_clone = output.clone();
+        let update_gamma_output_cb =
+            move |ctx: &mut MethodContext<State>, args: UpdateGammaArgs| {
+                let global_color = ctx.state.color();
 
-            let output = output.borrow_mut();
-            let color = output.color();
-            let gamma = (color.gamma + args.delta).max(0.1);
+                let output = output_clone.borrow_mut();
+                let color = output.color();
+                let gamma = (color.gamma + args.delta).max(0.1);
 
-            if color.gamma != gamma {
-                let value = gamma.into();
-                signal_change(&mut ctx.conn.send, ctx.object_path, "Gamma", value);
-
-                let gamma = ctx.state.color().gamma;
-                if gamma != global_color.gamma {
+                if color.gamma != gamma {
                     let value = gamma.into();
-                    signal_change(&mut ctx.conn.send, "/", "Gamma", value);
+                    signal_change(&mut ctx.conn.send, ctx.object_path, "Gamma", value);
+
+                    let gamma = ctx.state.color().gamma;
+                    if gamma != global_color.gamma {
+                        let value = gamma.into();
+                        signal_change(&mut ctx.conn.send, "/", "Gamma", value);
+                    }
                 }
-            }
-        };
+            };
 
-        let get_gamma_output_cb = |ctx: PropContext<State>| output.borrow().color().gamma;
+        let output_clone = output.clone();
+        let get_gamma_output_cb =
+            move |_ctx: PropContext<State>| output_clone.borrow().color().gamma;
 
-        let set_gamma_output_cb = |ctx: PropContext<State>, val: UnVariant| {
+        let output_clone = output.clone();
+        let set_gamma_output_cb = move |ctx: PropContext<State>, val: UnVariant| {
             let global_color = ctx.state.color();
 
-            let output = output.borrow_mut();
+            let output = output_clone.borrow_mut();
             let color = output.color();
             let gamma = val.get::<f64>().unwrap().max(0.1);
 

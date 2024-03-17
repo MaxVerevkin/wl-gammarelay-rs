@@ -192,7 +192,7 @@ dependencies = [
 [[package]]
 name = "rustbus"
 version = "0.19.3"
-source = "git+https://github.com/KillingSpark/rustbus?rev=bf87291#bf872910143397c6dd3185dd989fbf606ded3a40"
+source = "git+https://github.com/KillingSpark/rustbus?rev=20af8f2#20af8f2a4296196779e1044c0c08d4e5f784fc61"
 dependencies = [
  "nix",
  "rustbus_derive",
@@ -202,7 +202,7 @@ dependencies = [
 [[package]]
 name = "rustbus-service"
 version = "0.1.0"
-source = "git+https://github.com/MaxVerevkin/rustbus-service?rev=cffa791#cffa79167032ce5b5b23097d5be87603e958f8f9"
+source = "git+https://github.com/MaxVerevkin/rustbus-service?rev=7401913#7401913977ccf665748b1f4dee033921e1c86afd"
 dependencies = [
  "rustbus",
  "rustbus-service-macros",
@@ -211,7 +211,7 @@ dependencies = [
 [[package]]
 name = "rustbus-service-macros"
 version = "0.1.0"
-source = "git+https://github.com/MaxVerevkin/rustbus-service?rev=cffa791#cffa79167032ce5b5b23097d5be87603e958f8f9"
+source = "git+https://github.com/MaxVerevkin/rustbus-service?rev=7401913#7401913977ccf665748b1f4dee033921e1c86afd"
 dependencies = [
  "proc-macro-crate",
  "quote",
@@ -220,8 +220,8 @@ dependencies = [
 
 [[package]]
 name = "rustbus_derive"
-version = "0.5.0"
-source = "git+https://github.com/KillingSpark/rustbus?rev=bf87291#bf872910143397c6dd3185dd989fbf606ded3a40"
+version = "0.6.0"
+source = "git+https://github.com/KillingSpark/rustbus?rev=20af8f2#20af8f2a4296196779e1044c0c08d4e5f784fc61"
 dependencies = [
  "proc-macro2",
  "quote",

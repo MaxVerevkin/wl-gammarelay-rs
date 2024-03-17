@@ -50,30 +50,35 @@ impl WaylandState {
             .find(|output| output.reg_name() == reg_name)
     }
 
+    /// Returns the average color of all outputs, or the default color if there are no outputs
     pub fn color(&self) -> Color {
-        let color = self.outputs.iter().fold(
-            Color {
-                inverted: true,
-                brightness: 0.0,
-                temp: 0,
-                gamma: 0.0,
-            },
-            |color, output| {
-                let output_color = output.color();
+        if self.outputs.is_empty() {
+            Color::default()
+        } else {
+            let color = self.outputs.iter().fold(
                 Color {
-                    inverted: color.inverted && output_color.inverted,
-                    brightness: color.brightness + output_color.brightness,
-                    temp: color.temp + output_color.temp,
-                    gamma: color.gamma + output_color.gamma,
-                }
-            },
-        );
+                    inverted: true,
+                    brightness: 0.0,
+                    temp: 0,
+                    gamma: 0.0,
+                },
+                |color, output| {
+                    let output_color = output.color();
+                    Color {
+                        inverted: color.inverted && output_color.inverted,
+                        brightness: color.brightness + output_color.brightness,
+                        temp: color.temp + output_color.temp,
+                        gamma: color.gamma + output_color.gamma,
+                    }
+                },
+            );
 
-        Color {
-            temp: color.temp / self.outputs.len() as u16,
-            gamma: color.gamma / self.outputs.len() as f64,
-            brightness: color.brightness / self.outputs.len() as f64,
-            inverted: color.inverted,
+            Color {
+                temp: color.temp / self.outputs.len() as u16,
+                gamma: color.gamma / self.outputs.len() as f64,
+                brightness: color.brightness / self.outputs.len() as f64,
+                inverted: color.inverted,
+            }
         }
     }
 

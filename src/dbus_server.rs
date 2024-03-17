@@ -318,7 +318,12 @@ impl DbusServer {
     }
 
     pub fn remove_output(&mut self, name: &str) {
-        todo!();
+        let outputs_object = self
+            .service
+            .get_object_mut("/outputs")
+            .expect("object /outputs not found");
+
+        outputs_object.remove_child(&name.replace('-', "_"));
     }
 
     pub fn poll(&mut self, state: &mut WaylandState) -> Result<()> {

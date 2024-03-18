@@ -362,9 +362,7 @@ struct UpdateBrightnessArgs {
 }
 
 fn update_brightness_root_cb(ctx: &mut MethodContext<WaylandState>, args: UpdateBrightnessArgs) {
-    let updated = ctx.state.update_brightness(args.delta);
-
-    if updated {
+    if ctx.state.update_brightness(args.delta) {
         let val = ctx.state.color().brightness;
         signal_change(
             &mut ctx.conn.send,
@@ -396,9 +394,7 @@ struct UpdateTemperatureArgs {
 }
 
 fn update_temperature_root_cb(ctx: &mut MethodContext<WaylandState>, args: UpdateTemperatureArgs) {
-    let updated = ctx.state.update_temperature(args.delta);
-
-    if updated {
+    if ctx.state.update_temperature(args.delta) {
         let val = ctx.state.color().temp;
         signal_change(
             &mut ctx.conn.send,
@@ -430,9 +426,7 @@ struct UpdateGammaArgs {
 }
 
 fn update_gamma_root_cb(ctx: &mut MethodContext<WaylandState>, args: UpdateGammaArgs) {
-    let updated = ctx.state.update_gamma(args.delta);
-
-    if updated {
+    if ctx.state.update_gamma(args.delta) {
         let val = ctx.state.color().gamma;
         signal_change(&mut ctx.conn.send, ctx.object_path, "Gamma", val.into());
         signal_updated_property_to_outputs(ctx, "Gamma", val.into());

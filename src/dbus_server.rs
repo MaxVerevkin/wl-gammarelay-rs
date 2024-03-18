@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::os::fd::{AsRawFd, RawFd};
 
-use crate::color::Color;
-use crate::WaylandState;
 use anyhow::Result;
 use rustbus::{
     connection::Timeout,
@@ -12,8 +10,10 @@ use rustbus::{
     wire::unmarshal::traits::Variant as UnVariant,
     DuplexConn, MessageBuilder,
 };
-use rustbus_service::rustbus;
-use rustbus_service::{Access, InterfaceImp, MethodContext, PropContext, Service};
+use rustbus_service::{rustbus, Access, InterfaceImp, MethodContext, PropContext, Service};
+
+use crate::color::Color;
+use crate::WaylandState;
 
 pub struct DbusServer {
     conn: DuplexConn,
@@ -88,11 +88,11 @@ impl DbusServer {
             output.set_color(Color { inverted, ..color });
 
             let value = inverted.into();
-            signal_change(&mut ctx.conn.send, ctx.object_path, "Inverted", value);
+            signal_change(ctx.conn, ctx.object_path, "Inverted", value);
 
             if ctx.state.color().inverted != global_color.inverted {
                 let value = inverted.into();
-                signal_change(&mut ctx.conn.send, "/", "Inverted", value);
+                signal_change(ctx.conn, "/", "Inverted", value);
             }
         };
 
@@ -115,11 +115,11 @@ impl DbusServer {
                 output.set_color(Color { inverted, ..color });
 
                 let value = inverted.into();
-                signal_change(&mut ctx.conn.send, ctx.object_path, "Inverted", value);
+                signal_change(ctx.conn, ctx.object_path, "Inverted", value);
 
                 if ctx.state.color().inverted != global_color.inverted {
                     let value = inverted.into();
-                    signal_change(&mut ctx.conn.send, "/", "Inverted", value);
+                    signal_change(ctx.conn, "/", "Inverted", value);
                 }
             }
         };
@@ -139,12 +139,12 @@ impl DbusServer {
                     });
 
                     let value = brightness.into();
-                    signal_change(&mut ctx.conn.send, ctx.object_path, "Brightness", value);
+                    signal_change(ctx.conn, ctx.object_path, "Brightness", value);
 
                     let brightness = ctx.state.color().brightness;
                     if brightness != global_color.brightness {
                         let value = brightness.into();
-                        signal_change(&mut ctx.conn.send, "/", "Brightness", value);
+                        signal_change(ctx.conn, "/", "Brightness", value);
                     }
                 }
             };
@@ -171,12 +171,12 @@ impl DbusServer {
                 });
 
                 let value = brightness.into();
-                signal_change(&mut ctx.conn.send, ctx.object_path, "Brightness", value);
+                signal_change(ctx.conn, ctx.object_path, "Brightness", value);
 
                 let brightness = ctx.state.color().brightness;
                 if brightness != global_color.brightness {
                     let value = brightness.into();
-                    signal_change(&mut ctx.conn.send, "/", "Brightness", value);
+                    signal_change(ctx.conn, "/", "Brightness", value);
                 }
             }
         };
@@ -190,12 +190,12 @@ impl DbusServer {
                     output.set_color(new_color);
 
                     let value = new_color.temp.into();
-                    signal_change(&mut ctx.conn.send, ctx.object_path, "Temperature", value);
+                    signal_change(ctx.conn, ctx.object_path, "Temperature", value);
 
                     let temp = ctx.state.color().temp;
                     if temp != global_color.temp {
                         let value = temp.into();
-                        signal_change(&mut ctx.conn.send, "/", "Temperature", value);
+                        signal_change(ctx.conn, "/", "Temperature", value);
                     }
                 }
             };
@@ -215,12 +215,12 @@ impl DbusServer {
                 output.set_color(Color { temp, ..color });
 
                 let value = temp.into();
-                signal_change(&mut ctx.conn.send, ctx.object_path, "Temperature", value);
+                signal_change(ctx.conn, ctx.object_path, "Temperature", value);
 
                 let temp = ctx.state.color().temp;
                 if temp != global_color.temp {
                     let value = temp.into();
-                    signal_change(&mut ctx.conn.send, "/", "Temperature", value);
+                    signal_change(ctx.conn, "/", "Temperature", value);
                 }
             }
         };
@@ -237,12 +237,12 @@ impl DbusServer {
                     output.set_color(Color { gamma, ..color });
 
                     let value = gamma.into();
-                    signal_change(&mut ctx.conn.send, ctx.object_path, "Gamma", value);
+                    signal_change(ctx.conn, ctx.object_path, "Gamma", value);
 
                     let gamma = ctx.state.color().gamma;
                     if gamma != global_color.gamma {
                         let value = gamma.into();
-                        signal_change(&mut ctx.conn.send, "/", "Gamma", value);
+                        signal_change(ctx.conn, "/", "Gamma", value);
                     }
                 }
             };
@@ -266,12 +266,12 @@ impl DbusServer {
                 output.set_color(Color { gamma, ..color });
 
                 let value = gamma.into();
-                signal_change(&mut ctx.conn.send, ctx.object_path, "Gamma", value);
+                signal_change(ctx.conn, ctx.object_path, "Gamma", value);
 
                 let gamma = ctx.state.color().gamma;
                 if gamma != global_color.gamma {
                     let value = gamma.into();
-                    signal_change(&mut ctx.conn.send, "/", "Gamma", value);
+                    signal_change(ctx.conn, "/", "Gamma", value);
                 }
             }
         };
@@ -333,13 +333,8 @@ fn toggle_inverted_root_cb(ctx: &mut MethodContext<WaylandState>, _args: ()) {
     let inverted = !ctx.state.color().inverted;
     ctx.state.set_inverted(inverted);
 
-    signal_change(
-        &mut ctx.conn.send,
-        ctx.object_path,
-        "Inverted",
-        inverted.into(),
-    );
-    signal_updated_property_to_outputs(ctx, "Inverted", inverted.into());
+    signal_change(ctx.conn, ctx.object_path, "Inverted", inverted.into());
+    signal_updated_property_to_outputs(ctx.conn, ctx.state, "Inverted", inverted.into());
 }
 
 fn get_inverted_root_cb(ctx: PropContext<WaylandState>) -> bool {
@@ -351,8 +346,8 @@ fn set_inverted_root_cb(ctx: PropContext<WaylandState>, val: UnVariant) {
     if ctx.state.color().inverted != val {
         ctx.state.set_inverted(val);
 
-        signal_change(&mut ctx.conn.send, ctx.object_path, ctx.name, val.into());
-        signal_set_property_to_outputs(ctx, val.into());
+        signal_change(ctx.conn, ctx.object_path, ctx.name, val.into());
+        signal_updated_property_to_outputs(ctx.conn, ctx.state, ctx.name, val.into());
     }
 }
 
@@ -364,13 +359,8 @@ struct UpdateBrightnessArgs {
 fn update_brightness_root_cb(ctx: &mut MethodContext<WaylandState>, args: UpdateBrightnessArgs) {
     if ctx.state.update_brightness(args.delta) {
         let val = ctx.state.color().brightness;
-        signal_change(
-            &mut ctx.conn.send,
-            ctx.object_path,
-            "Brightness",
-            val.into(),
-        );
-        signal_updated_property_to_outputs(ctx, "Brightness", val.into());
+        signal_change(ctx.conn, ctx.object_path, "Brightness", val.into());
+        signal_updated_property_to_outputs(ctx.conn, ctx.state, "Brightness", val.into());
     }
 }
 
@@ -383,8 +373,8 @@ fn set_brightness_root_cb(ctx: PropContext<WaylandState>, val: UnVariant) {
     if ctx.state.color().brightness != val {
         ctx.state.set_brightness(val);
 
-        signal_change(&mut ctx.conn.send, ctx.object_path, ctx.name, val.into());
-        signal_set_property_to_outputs(ctx, val.into());
+        signal_change(ctx.conn, ctx.object_path, ctx.name, val.into());
+        signal_updated_property_to_outputs(ctx.conn, ctx.state, ctx.name, val.into());
     }
 }
 
@@ -396,13 +386,8 @@ struct UpdateTemperatureArgs {
 fn update_temperature_root_cb(ctx: &mut MethodContext<WaylandState>, args: UpdateTemperatureArgs) {
     if ctx.state.update_temperature(args.delta) {
         let val = ctx.state.color().temp;
-        signal_change(
-            &mut ctx.conn.send,
-            ctx.object_path,
-            "Temperature",
-            val.into(),
-        );
-        signal_updated_property_to_outputs(ctx, "Temperature", val.into());
+        signal_change(ctx.conn, ctx.object_path, "Temperature", val.into());
+        signal_updated_property_to_outputs(ctx.conn, ctx.state, "Temperature", val.into());
     }
 }
 
@@ -415,8 +400,8 @@ fn set_temperature_root_cb(ctx: PropContext<WaylandState>, val: UnVariant) {
     if ctx.state.color().temp != val {
         ctx.state.set_temperature(val);
 
-        signal_change(&mut ctx.conn.send, ctx.object_path, ctx.name, val.into());
-        signal_set_property_to_outputs(ctx, val.into());
+        signal_change(ctx.conn, ctx.object_path, ctx.name, val.into());
+        signal_updated_property_to_outputs(ctx.conn, ctx.state, ctx.name, val.into());
     }
 }
 
@@ -428,8 +413,8 @@ struct UpdateGammaArgs {
 fn update_gamma_root_cb(ctx: &mut MethodContext<WaylandState>, args: UpdateGammaArgs) {
     if ctx.state.update_gamma(args.delta) {
         let val = ctx.state.color().gamma;
-        signal_change(&mut ctx.conn.send, ctx.object_path, "Gamma", val.into());
-        signal_updated_property_to_outputs(ctx, "Gamma", val.into());
+        signal_change(ctx.conn, ctx.object_path, "Gamma", val.into());
+        signal_updated_property_to_outputs(ctx.conn, ctx.state, "Gamma", val.into());
     }
 }
 
@@ -442,8 +427,8 @@ fn set_gamma_root_cb(ctx: PropContext<WaylandState>, val: UnVariant) {
     if ctx.state.color().gamma != val {
         ctx.state.set_gamma(val);
 
-        signal_change(&mut ctx.conn.send, ctx.object_path, ctx.name, val.into());
-        signal_set_property_to_outputs(ctx, val.into());
+        signal_change(ctx.conn, ctx.object_path, ctx.name, val.into());
+        signal_updated_property_to_outputs(ctx.conn, ctx.state, ctx.name, val.into());
     }
 }
 
@@ -466,37 +451,20 @@ fn prop_changed_message(path: &str, iface: &str, prop: &str, value: Param) -> Ma
     sig
 }
 
-fn signal_change(send: &mut rustbus::SendConn, path: &str, prop: &str, value: Param) {
+fn signal_change(conn: &mut DuplexConn, path: &str, prop: &str, value: Param) {
     let output_sig = prop_changed_message(path, "rs.wl.gammarelay", prop, value);
-    send.send_message_write_all(&output_sig).unwrap();
-}
-
-fn signal_set_property_to_outputs(ctx: PropContext<WaylandState>, value: Param) {
-    for output in ctx
-        .state
-        .outputs
-        .iter()
-        .filter(|output| output.color_changed())
-    {
-        if let Some(path) = output.object_path() {
-            signal_change(&mut ctx.conn.send, &path, ctx.name, value.clone());
-        }
-    }
+    conn.send.send_message_write_all(&output_sig).unwrap();
 }
 
 fn signal_updated_property_to_outputs(
-    ctx: &mut MethodContext<WaylandState>,
+    conn: &mut DuplexConn,
+    state: &WaylandState,
     name: &str,
     value: Param,
 ) {
-    for output in ctx
-        .state
-        .outputs
-        .iter()
-        .filter(|output| output.color_changed())
-    {
+    for output in state.outputs.iter().filter(|output| output.color_changed()) {
         if let Some(path) = output.object_path() {
-            signal_change(&mut ctx.conn.send, &path, name, value.clone());
+            signal_change(conn, &path, name, value.clone());
         }
     }
 }

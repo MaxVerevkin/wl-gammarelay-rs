@@ -27,14 +27,74 @@ enum Command {
     Watch { format: String },
 }
 
+fn main() -> anyhow::Result<()> {
+    let command = Cli::parse().command.unwrap_or(Command::Run);
+    let dbus_server = dbus_server::DbusServer::new()?;
+
+    match command {
+        Command::Run => {
+            if let Some(dbus_server) = dbus_server {
+                let (mut wayland, wayland_state) = wayland::Wayland::new()?;
+
+                let mut fds = [pollin(&dbus_server), pollin(&wayland)];
+                let mut state = State {
+                    wayland_state,
+                    dbus_server,
+                };
+
+                loop {
+                    poll(&mut fds)?;
+                    if fds[0].revents != 0 {
+                        state.dbus_server.poll(&mut state.wayland_state)?;
+                    }
+                    if fds[1].revents != 0 || state.wayland_state.color_changed() {
+                        state = wayland.poll(state)?;
+                    }
+                }
+            } else {
+                eprintln!("wl-gammarelay-rs is already running");
+            }
+        }
+        Command::Watch { format } => {
+            let mut dbus_client = dbus_client::DbusClient::new(format, dbus_server.is_none())?;
+            if let Some(dbus_server) = dbus_server {
+                let (mut wayland, state) = wayland::Wayland::new()?;
+
+                let mut fds = [pollin(&dbus_server), pollin(&wayland), pollin(&dbus_client)];
+                let mut state = State {
+                    wayland_state: state,
+                    dbus_server,
+                };
+
+                loop {
+                    poll(&mut fds)?;
+                    if fds[0].revents != 0 {
+                        state.dbus_server.poll(&mut state.wayland_state)?;
+                    }
+                    if fds[1].revents != 0 || state.wayland_state.color_changed() {
+                        state = wayland.poll(state)?;
+                    }
+                    if fds[2].revents != 0 {
+                        dbus_client.run(false)?;
+                    }
+                }
+            } else {
+                dbus_client.run(true)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub struct WaylandState {
     outputs: Vec<wayland::Output>,
     gamma_manager: ZwlrGammaControlManagerV1,
 }
 
 pub struct State {
-    pub wayland_state: WaylandState,
-    pub dbus_server: DbusServer,
+    wayland_state: WaylandState,
+    dbus_server: DbusServer,
 }
 
 impl WaylandState {
@@ -162,66 +222,6 @@ impl WaylandState {
 
         updated
     }
-}
-
-fn main() -> anyhow::Result<()> {
-    let command = Cli::parse().command.unwrap_or(Command::Run);
-    let dbus_server = dbus_server::DbusServer::new()?;
-
-    match command {
-        Command::Run => {
-            if let Some(dbus_server) = dbus_server {
-                let (mut wayland, wayland_state) = wayland::Wayland::new()?;
-
-                let mut fds = [pollin(&dbus_server), pollin(&wayland)];
-                let mut state = State {
-                    wayland_state,
-                    dbus_server,
-                };
-
-                loop {
-                    poll(&mut fds)?;
-                    if fds[0].revents != 0 {
-                        state.dbus_server.poll(&mut state.wayland_state)?;
-                    }
-                    if fds[1].revents != 0 || state.wayland_state.color_changed() {
-                        state = wayland.poll(state)?;
-                    }
-                }
-            } else {
-                eprintln!("wl-gammarelay-rs is already running");
-            }
-        }
-        Command::Watch { format } => {
-            let mut dbus_client = dbus_client::DbusClient::new(format, dbus_server.is_none())?;
-            if let Some(dbus_server) = dbus_server {
-                let (mut wayland, state) = wayland::Wayland::new()?;
-
-                let mut fds = [pollin(&dbus_server), pollin(&wayland), pollin(&dbus_client)];
-                let mut state = State {
-                    wayland_state: state,
-                    dbus_server,
-                };
-
-                loop {
-                    poll(&mut fds)?;
-                    if fds[0].revents != 0 {
-                        state.dbus_server.poll(&mut state.wayland_state)?;
-                    }
-                    if fds[1].revents != 0 || state.wayland_state.color_changed() {
-                        state = wayland.poll(state)?;
-                    }
-                    if fds[2].revents != 0 {
-                        dbus_client.run(false)?;
-                    }
-                }
-            } else {
-                dbus_client.run(true)?;
-            }
-        }
-    }
-
-    Ok(())
 }
 
 fn pollin(fd: &impl AsRawFd) -> libc::pollfd {

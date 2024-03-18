@@ -107,10 +107,6 @@ impl Output {
         self.reg_name
     }
 
-    pub fn name(&self) -> &str {
-        self.name.as_ref().unwrap()
-    }
-
     pub fn color(&self) -> Color {
         self.color
     }
@@ -128,8 +124,10 @@ impl Output {
         self.color_changed = true;
     }
 
-    pub fn object_path(&self) -> String {
-        format!("/outputs/{}", self.name().replace('-', "_"))
+    pub fn object_path(&self) -> Option<String> {
+        self.name
+            .as_deref()
+            .map(|name| format!("/outputs/{}", name.replace('-', "_")))
     }
 
     fn update_displayed_color(&mut self, conn: &mut Connection<State>) -> Result<()> {

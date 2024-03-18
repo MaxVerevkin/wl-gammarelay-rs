@@ -478,12 +478,9 @@ fn signal_set_property_to_outputs(ctx: PropContext<WaylandState>, value: Param) 
         .iter()
         .filter(|output| output.color_changed())
     {
-        signal_change(
-            &mut ctx.conn.send,
-            &output.object_path(),
-            ctx.name,
-            value.clone(),
-        );
+        if let Some(path) = output.object_path() {
+            signal_change(&mut ctx.conn.send, &path, ctx.name, value.clone());
+        }
     }
 }
 
@@ -498,11 +495,8 @@ fn signal_updated_property_to_outputs(
         .iter()
         .filter(|output| output.color_changed())
     {
-        signal_change(
-            &mut ctx.conn.send,
-            &output.object_path(),
-            name,
-            value.clone(),
-        );
+        if let Some(path) = output.object_path() {
+            signal_change(&mut ctx.conn.send, &path, name, value.clone());
+        }
     }
 }

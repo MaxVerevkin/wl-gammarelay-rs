@@ -132,11 +132,9 @@ impl WaylandState {
     pub fn update_temperature(&mut self, delta: i16) -> bool {
         let mut updated = false;
         for output in &mut self.outputs {
-            let color = output.color();
-            let temp = (color.temp as i16 + delta).clamp(1_000, 10_000) as u16;
-            if temp != color.temp {
+            if let Some(new_color) = output.color().with_updated_temp(delta) {
                 updated = true;
-                output.set_color(Color { temp, ..color });
+                output.set_color(new_color);
             }
         }
 

@@ -186,13 +186,10 @@ impl DbusServer {
                 let global_color = ctx.state.color();
 
                 let output = ctx.state.mut_output_by_reg_name(reg_name).unwrap();
-                let color = output.color();
-                let temp = (color.temp as i16 + args.delta).clamp(1_000, 10_000) as u16;
+                if let Some(new_color) = output.color().with_updated_temp(args.delta) {
+                    output.set_color(new_color);
 
-                if color.temp != temp {
-                    output.set_color(Color { temp, ..color });
-
-                    let value = temp.into();
+                    let value = new_color.temp.into();
                     signal_change(&mut ctx.conn.send, ctx.object_path, "Temperature", value);
 
                     let temp = ctx.state.color().temp;

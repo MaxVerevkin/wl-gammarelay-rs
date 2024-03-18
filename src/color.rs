@@ -18,6 +18,18 @@ impl Default for Color {
     }
 }
 
+impl Color {
+    /// Returns a color with update temperature, clamping it to [1K, 10K] range, or none if
+    /// temperature could not be updated.
+    pub fn with_updated_temp(self, delta: i16) -> Option<Self> {
+        let new_temp = self.temp.saturating_add_signed(delta).clamp(1_000, 10_000);
+        (new_temp != self.temp).then_some(Self {
+            temp: new_temp,
+            ..self
+        })
+    }
+}
+
 fn map_intensity(v: f64, white: f64, color: Color, v_max_gamma: f64) -> u16 {
     // A gamma ramp is computed as f(x) = x^γ, for x ∈ [0,1].
     // Multiple gamma adjustments can reasonably be combined as

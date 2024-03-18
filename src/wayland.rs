@@ -48,9 +48,9 @@ impl Wayland {
         Ok((Self { conn }, state))
     }
 
-    pub fn poll(&mut self, mut state: State) -> Result<State> {
+    pub fn poll(&mut self, state: &mut State) -> Result<()> {
         match self.conn.recv_events(IoMode::NonBlocking) {
-            Ok(()) => self.conn.dispatch_events(&mut state),
+            Ok(()) => self.conn.dispatch_events(state),
             Err(e) if e.kind() == ErrorKind::WouldBlock => (),
             Err(e) => return Err(e.into()),
         }
@@ -61,7 +61,7 @@ impl Wayland {
             }
         }
         self.conn.flush(IoMode::Blocking)?;
-        Ok(state)
+        Ok(())
     }
 }
 

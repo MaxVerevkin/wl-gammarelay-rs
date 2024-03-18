@@ -48,7 +48,7 @@ fn main() -> anyhow::Result<()> {
                         state.dbus_server.poll(&mut state.wayland_state)?;
                     }
                     if fds[1].revents != 0 || state.wayland_state.color_changed() {
-                        state = wayland.poll(state)?;
+                        wayland.poll(&mut state)?;
                     }
                 }
             } else {
@@ -72,7 +72,7 @@ fn main() -> anyhow::Result<()> {
                         state.dbus_server.poll(&mut state.wayland_state)?;
                     }
                     if fds[1].revents != 0 || state.wayland_state.color_changed() {
-                        state = wayland.poll(state)?;
+                        wayland.poll(&mut state)?;
                     }
                     if fds[2].revents != 0 {
                         dbus_client.run(false)?;

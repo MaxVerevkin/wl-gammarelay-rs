@@ -6,7 +6,6 @@ use anyhow::Result;
 use wayrs_client::cstr;
 use wayrs_client::global::*;
 use wayrs_client::protocol::*;
-use wayrs_client::proxy::Proxy;
 use wayrs_client::{Connection, EventCtx, IoMode};
 use wayrs_protocols::wlr_gamma_control_unstable_v1::*;
 
@@ -112,12 +111,10 @@ impl Output {
     }
 
     pub fn set_color(&mut self, color: Color) {
-        if self.ramp_size == 0 || color == self.color {
-            return;
+        if color != self.color {
+            self.color = color;
+            self.color_changed = true;
         }
-
-        self.color = color;
-        self.color_changed = true;
     }
 
     pub fn object_path(&self) -> Option<String> {

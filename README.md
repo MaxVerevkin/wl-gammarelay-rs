@@ -114,3 +114,53 @@ busctl --user call rs.wl-gammarelay / rs.wl.gammarelay UpdateGamma d 0.1
 # Decrease gamma by `0.1`:
 busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateGamma d -0.1
 ```
+
+## With multiple outputs
+
+Each connected output is listed under `/outputs` and its properties can be seen and edited separately. For example, a laptop with an internal "eDP-1" monitor and a "HDMI-A-1" output has the following DBus objects:
+
+```sh
+$ busctl --user tree rs.wl-gammarelay
+└─ /outputs
+  ├─ /outputs/HDMI_A_1
+  └─ /outputs/eDP_1
+```
+
+You can operate on a specific output using its object path:
+
+```sh
+# Set the temperature to `5000` for the HDMI output
+busctl --user set-property rs.wl-gammarelay /outputs/HDMI_A_1 rs.wl.gammarelay Temperature q 5000
+
+# Set the temperature to `9000` for the internal monitor
+busctl --user set-property rs.wl-gammarelay /outputs/eDP_1 rs.wl.gammarelay Temperature q 9000
+```
+
+When there are several outputs, the values shown are:
+
+- for the brightness, temperature and gamma, the average of all outputs' values
+- for the inverted boolean, true if all outputs are inverted and false otherwise
+
+When updating the brightness, temperature or gamma value, the modification is applied to each output:
+
+```sh
+# Get the values
+$ busctl --user -- get-property rs.wl-gammarelay /outputs/eDP_1 rs.wl.gammarelay Brightness
+d 0.7
+$ busctl --user -- get-property rs.wl-gammarelay /outputs/HDMI_A_1 rs.wl.gammarelay Brightness
+d 0.5
+
+# Update all outputs
+$ busctl --user -- call rs.wl-gammarelay / rs.wl.gammarelay UpdateBrightness d 0.05
+
+# Get the values again
+$ busctl --user -- get-property rs.wl-gammarelay /outputs/eDP_1 rs.wl.gammarelay Brightness
+d 0.75
+$ busctl --user -- get-property rs.wl-gammarelay /outputs/HDMI_A_1 rs.wl.gammarelay Brightness
+d 0.55
+```
+
+When toggling the inverted status:
+
+- if all the monitors are inverted, then all of them are reverted to normal
+- otherwise, all monitors are made inverted, even if they already were inverted

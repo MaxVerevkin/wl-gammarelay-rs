@@ -1,16 +1,14 @@
-use wayrs_client::protocol::*;
-use wayrs_client::{EventCtx, IoMode};
-use wayrs_protocols::wlr_gamma_control_unstable_v1::*;
+use std::io::ErrorKind;
+use std::os::fd::{AsRawFd, RawFd};
 
 use anyhow::Result;
 
 use wayrs_client::cstr;
 use wayrs_client::global::*;
+use wayrs_client::protocol::*;
 use wayrs_client::proxy::Proxy;
-use wayrs_client::Connection;
-
-use std::io::ErrorKind;
-use std::os::fd::{AsRawFd, RawFd};
+use wayrs_client::{Connection, EventCtx, IoMode};
+use wayrs_protocols::wlr_gamma_control_unstable_v1::*;
 
 use crate::color::{colorramp_fill, Color};
 use crate::{State, WaylandState};
@@ -88,7 +86,7 @@ impl Output {
             reg_name: global.name,
             wl: output,
             name: None,
-            color: Default::default(),
+            color: Color::default(),
             gamma_control: gamma_manager.get_gamma_control_with_cb(conn, output, gamma_control_cb),
             ramp_size: 0,
             color_changed: true,

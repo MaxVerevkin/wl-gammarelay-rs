@@ -96,9 +96,7 @@ impl Output {
     fn destroy(self, conn: &mut Connection<State>) {
         eprintln!("Output {} removed", self.reg_name);
         self.gamma_control.destroy(conn);
-        if self.wl.version() >= 3 {
-            self.wl.release(conn);
-        }
+        self.wl.release(conn);
     }
 
     pub fn reg_name(&self) -> u32 {

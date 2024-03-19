@@ -14,7 +14,7 @@ bytemuck = "1.13"
 clap = { version = "4.0", default-features = false, features = ["std", "help", "usage", "derive"] }
 libc = "0.2"
 memmap2 = "0.9"
-rustbus-service = { git = "https://github.com/MaxVerevkin/rustbus-service", rev = "7401913" }
+rustbus-service = { git = "https://github.com/MaxVerevkin/rustbus-service", rev = "681b783" }
 shmemfdrs2 = "1.0"
 wayrs-client = "1.0"
 wayrs-protocols = { version = "0.13", features = ["wlr-gamma-control-unstable-v1"] }

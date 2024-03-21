@@ -202,7 +202,7 @@ dependencies = [
 [[package]]
 name = "rustbus-service"
 version = "0.1.0"
-source = "git+https://github.com/MaxVerevkin/rustbus-service?rev=367fcb4#367fcb41b07d0aab31fabd12f90c2eda4c748e56"
+source = "git+https://github.com/MaxVerevkin/rustbus-service?rev=1bd3aef#1bd3aef5fe2a646685c8e640c0f67a645eeaf41d"
 dependencies = [
  "rustbus",
  "rustbus-service-macros",
@@ -211,7 +211,7 @@ dependencies = [
 [[package]]
 name = "rustbus-service-macros"
 version = "0.1.0"
-source = "git+https://github.com/MaxVerevkin/rustbus-service?rev=367fcb4#367fcb41b07d0aab31fabd12f90c2eda4c748e56"
+source = "git+https://github.com/MaxVerevkin/rustbus-service?rev=1bd3aef#1bd3aef5fe2a646685c8e640c0f67a645eeaf41d"
 dependencies = [
  "proc-macro-crate",
  "quote",

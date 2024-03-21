@@ -33,6 +33,9 @@ impl DbusServer {
 
         let mut service = Service::new();
 
+        // See https://github.com/MaxVerevkin/wl-gammarelay-rs/issues/22
+        service.set_error_cb("org.freedesktop.DBus.Error.ServiceUnknown", |_| ());
+
         let req_name_serial =
             conn.send
                 .send_message_write_all(&rustbus::standard_messages::request_name(

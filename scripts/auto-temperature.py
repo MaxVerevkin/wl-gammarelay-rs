@@ -5,22 +5,22 @@ import subprocess
 from datetime import datetime
 from time import sleep
 
+def mk_time(hours, minutes, seconds=0):
+    """ Seconds since the beginning of day """
+    return hours * 3600.0 + minutes * 60.0 + seconds
 
 TEMP_DAY = 6500.0
 TEMP_NIGHT = 3800.0
 
-DAWN_TIME = 9 * 3600.0  # 9am (Should be > WINDOW)
-DUSK_TIME = 19 * 3600.0  # 19pm (Shoulbe be > WINDOW + DAWN_TIME)
-
-WINDOW = 900  # 15m (The time during which the temperature changes gradually until it reaches the desired value)
-
+DAWN_TIME = mk_time( 9,  0) # 9:00 (Should be > WINDOW)
+DUSK_TIME = mk_time(19,  0) # 19:00 (Shoulbe be > WINDOW + DAWN_TIME)
+WINDOW =    mk_time( 0, 15) # 15m (The time during which the temperature changes gradually until it reaches the desired value)
 
 temp = None
 
 while True:
     now = datetime.now().astimezone()
-    # Seconds since the beginning of day
-    current_time = now.hour * 3600 + now.minute * 60 + now.second
+    current_time = mk_time(now.hour, now.minute, now.second)
 
     if DAWN_TIME - WINDOW < current_time < DAWN_TIME:
         temp = (DAWN_TIME - current_time) * (TEMP_NIGHT - TEMP_DAY) / WINDOW + TEMP_DAY

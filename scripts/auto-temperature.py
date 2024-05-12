@@ -26,9 +26,9 @@ while True:
         temp = (DAWN_TIME - current_time) * (TEMP_NIGHT - TEMP_DAY) / WINDOW + TEMP_DAY
     elif DUSK_TIME - WINDOW < current_time < DUSK_TIME:
         temp = (DUSK_TIME - current_time) * (TEMP_DAY - TEMP_NIGHT) / WINDOW + TEMP_NIGHT
-    elif current_time > DUSK_TIME or current_time < DAWN_TIME:
+    elif current_time >= DUSK_TIME or current_time < DAWN_TIME:
         temp = TEMP_NIGHT
-    elif current_time > DAWN_TIME or current_time < DUSK_TIME:
+    elif current_time >= DAWN_TIME or current_time < DUSK_TIME:
         temp = TEMP_DAY
 
     if temp:

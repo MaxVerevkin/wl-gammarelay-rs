@@ -17,7 +17,7 @@ memmap2 = "0.9"
 rustbus-service = { git = "https://github.com/MaxVerevkin/rustbus-service", rev = "1bd3aef" }
 shmemfdrs2 = "1.0"
 wayrs-client = "1.0"
-wayrs-protocols = { version = "0.13", features = ["wlr-gamma-control-unstable-v1"] }
+wayrs-protocols = { version = "0.14", features = ["wlr-gamma-control-unstable-v1"] }
 
 # [patch.'https://github.com/KillingSpark/rustbus']
 # rustbus = { path = "../rustbus/rustbus" }

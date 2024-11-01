@@ -1,7 +1,7 @@
 use std::io::ErrorKind;
 use std::os::fd::{AsRawFd, RawFd};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 use wayrs_client::cstr;
 use wayrs_client::global::*;
@@ -27,7 +27,9 @@ impl Wayland {
         let (mut conn, globals) = Connection::connect_and_collect_globals()?;
         conn.add_registry_cb(wl_registry_cb);
 
-        let gamma_manager = globals.bind(&mut conn, 1)?;
+        let Ok(gamma_manager) = globals.bind(&mut conn, 1) else {
+            bail!("Your Wayland compositor is not supported because it does not implement the wlr-gamma-control-unstable-v1 protocol");
+        };
 
         let outputs = globals
             .iter()

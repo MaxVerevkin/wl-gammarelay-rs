@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::io::ErrorKind;
 use std::os::fd::{AsRawFd, RawFd};
 
@@ -10,10 +11,21 @@ use wayrs_client::{Connection, EventCtx, IoMode};
 use wayrs_protocols::wlr_gamma_control_unstable_v1::*;
 
 use crate::color::{colorramp_fill, Color};
-use crate::{State, WaylandState};
 
 pub struct Wayland {
-    conn: Connection<State>,
+    conn: Connection<WaylandState>,
+    pub state: WaylandState,
+}
+
+pub struct WaylandState {
+    pub outputs: Vec<Output>,
+    pub gamma_manager: ZwlrGammaControlManagerV1,
+    pub events: VecDeque<WaylandEvent>,
+}
+
+pub enum WaylandEvent {
+    NewOutput { reg_name: u32, name: String },
+    RemoveOutput { name: String },
 }
 
 impl AsRawFd for Wayland {
@@ -23,44 +35,46 @@ impl AsRawFd for Wayland {
 }
 
 impl Wayland {
-    pub fn new() -> Result<(Self, WaylandState)> {
-        let (mut conn, globals) = Connection::connect_and_collect_globals()?;
-        conn.add_registry_cb(wl_registry_cb);
+    pub fn new() -> Result<Self> {
+        let mut conn = Connection::connect()?;
+        conn.blocking_roundtrip()?;
 
-        let Ok(gamma_manager) = globals.bind(&mut conn, 1) else {
+        let Ok(gamma_manager) = conn.bind_singleton(1) else {
             bail!("Your Wayland compositor is not supported because it does not implement the wlr-gamma-control-unstable-v1 protocol");
         };
 
-        let outputs = globals
-            .iter()
-            .filter(|g| g.is::<WlOutput>())
-            .map(|output| Output::bind(&mut conn, output, gamma_manager))
-            .collect();
-
-        let state = WaylandState {
-            outputs,
+        let mut state = WaylandState {
+            outputs: Vec::new(),
             gamma_manager,
+            events: VecDeque::new(),
         };
 
+        conn.add_registry_cb(wl_registry_cb);
+        conn.dispatch_events(&mut state);
         conn.flush(IoMode::Blocking)?;
 
-        Ok((Self { conn }, state))
+        Ok(Self { conn, state })
     }
 
-    pub fn poll(&mut self, state: &mut State) -> Result<()> {
+    pub fn poll(&mut self) -> Result<()> {
         match self.conn.recv_events(IoMode::NonBlocking) {
-            Ok(()) => self.conn.dispatch_events(state),
+            Ok(()) => self.conn.dispatch_events(&mut self.state),
             Err(e) if e.kind() == ErrorKind::WouldBlock => (),
             Err(e) => return Err(e.into()),
         }
 
-        for output in &mut state.wayland_state.outputs {
+        for output in &mut self.state.outputs {
             if output.color_changed {
                 output.update_displayed_color(&mut self.conn)?;
             }
         }
+
         self.conn.flush(IoMode::Blocking)?;
         Ok(())
+    }
+
+    pub fn next_event(&mut self) -> Option<WaylandEvent> {
+        self.state.events.pop_front()
     }
 }
 
@@ -77,7 +91,7 @@ pub struct Output {
 
 impl Output {
     fn bind(
-        conn: &mut Connection<State>,
+        conn: &mut Connection<WaylandState>,
         global: &Global,
         gamma_manager: ZwlrGammaControlManagerV1,
     ) -> Self {
@@ -94,7 +108,7 @@ impl Output {
         }
     }
 
-    fn destroy(self, conn: &mut Connection<State>) {
+    fn destroy(self, conn: &mut Connection<WaylandState>) {
         eprintln!("Output {} removed", self.reg_name);
         self.gamma_control.destroy(conn);
         self.wl.release(conn);
@@ -125,7 +139,7 @@ impl Output {
             .map(|name| format!("/outputs/{}", name.replace('-', "_")))
     }
 
-    fn update_displayed_color(&mut self, conn: &mut Connection<State>) -> Result<()> {
+    fn update_displayed_color(&mut self, conn: &mut Connection<WaylandState>) -> Result<()> {
         if self.ramp_size == 0 {
             return Ok(());
         }
@@ -144,25 +158,26 @@ impl Output {
     }
 }
 
-fn wl_registry_cb(conn: &mut Connection<State>, state: &mut State, event: &wl_registry::Event) {
+fn wl_registry_cb(
+    conn: &mut Connection<WaylandState>,
+    state: &mut WaylandState,
+    event: &wl_registry::Event,
+) {
     match event {
         wl_registry::Event::Global(global) if global.is::<WlOutput>() => {
-            let mut output = Output::bind(conn, global, state.wayland_state.gamma_manager);
-            output.set_color(state.wayland_state.color());
+            let mut output = Output::bind(conn, global, state.gamma_manager);
+            output.set_color(state.color());
             output.update_displayed_color(conn).unwrap();
-            state.wayland_state.outputs.push(output);
+            state.outputs.push(output);
         }
         wl_registry::Event::GlobalRemove(name) => {
-            if let Some(output_index) = state
-                .wayland_state
-                .outputs
-                .iter()
-                .position(|o| o.reg_name == *name)
-            {
-                if let Some(output_name) = &state.wayland_state.outputs[output_index].name {
-                    state.dbus_server.remove_output(output_name);
+            if let Some(output_index) = state.outputs.iter().position(|o| o.reg_name == *name) {
+                let output = state.outputs.swap_remove(output_index);
+                if let Some(output_name) = &output.name {
+                    state.events.push_back(WaylandEvent::RemoveOutput {
+                        name: output_name.clone(),
+                    });
                 }
-                let output = state.wayland_state.outputs.swap_remove(output_index);
                 output.destroy(conn);
             }
         }
@@ -170,26 +185,27 @@ fn wl_registry_cb(conn: &mut Connection<State>, state: &mut State, event: &wl_re
     }
 }
 
-fn gamma_control_cb(ctx: EventCtx<State, ZwlrGammaControlV1>) {
+fn gamma_control_cb(ctx: EventCtx<WaylandState, ZwlrGammaControlV1>) {
     let output_index = ctx
         .state
-        .wayland_state
         .outputs
         .iter()
         .position(|o| o.gamma_control == ctx.proxy)
         .expect("Received event for unknown output");
     match ctx.event {
         zwlr_gamma_control_v1::Event::GammaSize(size) => {
-            let output = &mut ctx.state.wayland_state.outputs[output_index];
+            let output = &mut ctx.state.outputs[output_index];
             eprintln!("Output {}: ramp_size = {}", output.reg_name, size);
             output.ramp_size = size as usize;
             output.update_displayed_color(ctx.conn).unwrap();
         }
         zwlr_gamma_control_v1::Event::Failed => {
-            let output = ctx.state.wayland_state.outputs.swap_remove(output_index);
+            let output = ctx.state.outputs.swap_remove(output_index);
             eprintln!("Output {}: gamma_control::Event::Failed", output.reg_name);
             if let Some(output_name) = &output.name {
-                ctx.state.dbus_server.remove_output(output_name);
+                ctx.state.events.push_back(WaylandEvent::RemoveOutput {
+                    name: output_name.clone(),
+                });
             }
             output.destroy(ctx.conn);
         }
@@ -197,18 +213,20 @@ fn gamma_control_cb(ctx: EventCtx<State, ZwlrGammaControlV1>) {
     }
 }
 
-fn wl_output_cb(ctx: EventCtx<State, WlOutput>) {
+fn wl_output_cb(ctx: EventCtx<WaylandState, WlOutput>) {
     if let wl_output::Event::Name(name) = ctx.event {
         let output = ctx
             .state
-            .wayland_state
             .outputs
             .iter_mut()
             .find(|o| o.wl == ctx.proxy)
             .unwrap();
         let name = String::from_utf8(name.into_bytes()).expect("invalid output name");
         eprintln!("Output {}: name = {name:?}", output.reg_name);
-        ctx.state.dbus_server.add_output(output.reg_name, &name);
+        ctx.state.events.push_back(WaylandEvent::NewOutput {
+            reg_name: output.reg_name,
+            name: name.clone(),
+        });
         output.name = Some(name);
     }
 }

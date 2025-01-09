@@ -4,11 +4,10 @@ mod dbus_server;
 mod wayland;
 
 use std::io;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, RawFd};
 
 use clap::{Parser, Subcommand};
-use dbus_server::DbusServer;
-use wayrs_protocols::wlr_gamma_control_unstable_v1::ZwlrGammaControlManagerV1;
+use wayland::WaylandEvent;
 
 use color::Color;
 
@@ -29,75 +28,56 @@ enum Command {
 
 fn main() -> anyhow::Result<()> {
     let command = Cli::parse().command.unwrap_or(Command::Run);
-    let dbus_server = dbus_server::DbusServer::new()?;
-
-    match command {
-        Command::Run => {
-            if let Some(dbus_server) = dbus_server {
-                let (mut wayland, wayland_state) = wayland::Wayland::new()?;
-
-                let mut fds = [pollin(&dbus_server), pollin(&wayland)];
-                let mut state = State {
-                    wayland_state,
-                    dbus_server,
-                };
-
-                loop {
-                    poll(&mut fds)?;
-                    if fds[0].revents != 0 {
-                        state.dbus_server.poll(&mut state.wayland_state)?;
-                    }
-                    if fds[1].revents != 0 || state.wayland_state.color_changed() {
-                        wayland.poll(&mut state)?;
+    match dbus_server::DbusServer::new()? {
+        Some(mut dbus_server) => {
+            let mut wayland = wayland::Wayland::new()?;
+            let mut dbus_client = match command {
+                Command::Run => None,
+                Command::Watch { format } => Some(dbus_client::DbusClient::new(format, false)?),
+            };
+            let mut fds = [
+                pollin(dbus_server.as_raw_fd()),
+                pollin(wayland.as_raw_fd()),
+                pollin(dbus_client.as_ref().map_or(-1, |x| x.as_raw_fd())),
+            ];
+            let fds_cnt = if dbus_client.is_some() { 3 } else { 2 };
+            loop {
+                while let Some(event) = wayland.next_event() {
+                    match event {
+                        WaylandEvent::NewOutput { reg_name, name } => {
+                            dbus_server.add_output(reg_name, &name);
+                        }
+                        WaylandEvent::RemoveOutput { name } => {
+                            dbus_server.remove_output(&name);
+                        }
                     }
                 }
-            } else {
-                eprintln!("wl-gammarelay-rs is already running");
+
+                poll(&mut fds[..fds_cnt])?;
+                if fds[0].revents != 0 {
+                    dbus_server.poll(&mut wayland.state)?;
+                }
+                if fds[1].revents != 0 || wayland.state.color_changed() {
+                    wayland.poll()?;
+                }
+                if fds[2].revents != 0 {
+                    dbus_client.as_mut().unwrap().run(false)?;
+                }
             }
         }
-        Command::Watch { format } => {
-            let mut dbus_client = dbus_client::DbusClient::new(format, dbus_server.is_none())?;
-            if let Some(dbus_server) = dbus_server {
-                let (mut wayland, state) = wayland::Wayland::new()?;
-
-                let mut fds = [pollin(&dbus_server), pollin(&wayland), pollin(&dbus_client)];
-                let mut state = State {
-                    wayland_state: state,
-                    dbus_server,
-                };
-
-                loop {
-                    poll(&mut fds)?;
-                    if fds[0].revents != 0 {
-                        state.dbus_server.poll(&mut state.wayland_state)?;
-                    }
-                    if fds[1].revents != 0 || state.wayland_state.color_changed() {
-                        wayland.poll(&mut state)?;
-                    }
-                    if fds[2].revents != 0 {
-                        dbus_client.run(false)?;
-                    }
-                }
-            } else {
+        None => match command {
+            Command::Run => eprintln!("wl-gammarelay-rs is already running"),
+            Command::Watch { format } => {
+                let mut dbus_client = dbus_client::DbusClient::new(format, true)?;
                 dbus_client.run(true)?;
             }
-        }
+        },
     }
 
     Ok(())
 }
 
-pub struct WaylandState {
-    outputs: Vec<wayland::Output>,
-    gamma_manager: ZwlrGammaControlManagerV1,
-}
-
-pub struct State {
-    wayland_state: WaylandState,
-    dbus_server: DbusServer,
-}
-
-impl WaylandState {
+impl wayland::WaylandState {
     pub fn output_by_reg_name(&self, reg_name: u32) -> Option<&wayland::Output> {
         self.outputs
             .iter()
@@ -224,9 +204,9 @@ impl WaylandState {
     }
 }
 
-fn pollin(fd: &impl AsRawFd) -> libc::pollfd {
+fn pollin(fd: RawFd) -> libc::pollfd {
     libc::pollfd {
-        fd: fd.as_raw_fd(),
+        fd,
         events: libc::POLLIN,
         revents: 0,
     }

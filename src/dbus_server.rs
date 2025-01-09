@@ -13,7 +13,7 @@ use rustbus::{
 use rustbus_service::{rustbus, Access, InterfaceImp, MethodContext, PropContext, Service};
 
 use crate::color::Color;
-use crate::WaylandState;
+use crate::wayland::WaylandState;
 
 pub struct DbusServer {
     conn: DuplexConn,

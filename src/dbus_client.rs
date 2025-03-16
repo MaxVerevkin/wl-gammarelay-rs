@@ -15,6 +15,7 @@ pub struct DbusClient {
     temperature: u16,
     gamma: f64,
     brightness: f64,
+    prev_output: Option<String>,
 }
 
 impl AsRawFd for DbusClient {
@@ -77,12 +78,13 @@ impl DbusClient {
             }
         }
 
-        let this = Self {
+        let mut this = Self {
             format,
             conn,
             temperature,
             gamma,
             brightness,
+            prev_output: None,
         };
 
         this.print();
@@ -128,14 +130,16 @@ impl DbusClient {
         }
     }
 
-    fn print(&self) {
-        println!(
-            "{}",
-            self.format
-                .replace("{t}", &self.temperature.to_string())
-                .replace("{g}", &format!("{:.2}", self.gamma))
-                .replace("{b}", &format!("{:.2}", self.brightness))
-                .replace("{bp}", &format!("{:.0}", self.brightness * 100.))
-        );
+    fn print(&mut self) {
+        let output = self
+            .format
+            .replace("{t}", &self.temperature.to_string())
+            .replace("{g}", &format!("{:.2}", self.gamma))
+            .replace("{b}", &format!("{:.2}", self.brightness))
+            .replace("{bp}", &format!("{:.0}", self.brightness * 100.));
+        if self.prev_output.as_ref().is_none_or(|prev| *prev != output) {
+            println!("{output}");
+            self.prev_output = Some(output);
+        }
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "wl-gammarelay-rs"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["Max Verevkin <maxxverrr@gmail.com>"]
 edition = "2024"
 description = "A simple program that provides DBus interface to control display temperature and brightness under wayland without flickering"

@@ -4,7 +4,6 @@ use std::os::fd::{AsRawFd, RawFd};
 
 use anyhow::{bail, Result};
 
-use wayrs_client::cstr;
 use wayrs_client::global::*;
 use wayrs_client::protocol::*;
 use wayrs_client::{Connection, EventCtx, IoMode};
@@ -144,7 +143,7 @@ impl Output {
             return Ok(());
         }
 
-        let file = shmemfdrs2::create_shmem(cstr!("/ramp-buffer"))?;
+        let file = shmemfdrs2::create_shmem(c"/ramp-buffer")?;
         file.set_len(self.ramp_size as u64 * 6)?;
         let mut mmap = unsafe { memmap2::MmapMut::map_mut(&file)? };
         let buf = bytemuck::cast_slice_mut::<u8, u16>(&mut mmap);

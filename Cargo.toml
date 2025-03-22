@@ -2,7 +2,7 @@
 name = "wl-gammarelay-rs"
 version = "1.0.0"
 authors = ["Max Verevkin <maxxverrr@gmail.com>"]
-edition = "2021"
+edition = "2024"
 description = "A simple program that provides DBus interface to control display temperature and brightness under wayland without flickering"
 repository = "https://github.com/MaxVerevkin/wl-gammarelay-rs"
 license = "GPL-3.0-only"

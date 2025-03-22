@@ -2,14 +2,14 @@ use std::collections::VecDeque;
 use std::io::ErrorKind;
 use std::os::fd::{AsRawFd, RawFd};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use wayrs_client::global::*;
 use wayrs_client::protocol::*;
 use wayrs_client::{Connection, EventCtx, IoMode};
 use wayrs_protocols::wlr_gamma_control_unstable_v1::*;
 
-use crate::color::{colorramp_fill, Color};
+use crate::color::{Color, colorramp_fill};
 
 pub struct Wayland {
     conn: Connection<WaylandState>,
@@ -39,7 +39,9 @@ impl Wayland {
         conn.blocking_roundtrip()?;
 
         let Ok(gamma_manager) = conn.bind_singleton(1) else {
-            bail!("Your Wayland compositor is not supported because it does not implement the wlr-gamma-control-unstable-v1 protocol");
+            bail!(
+                "Your Wayland compositor is not supported because it does not implement the wlr-gamma-control-unstable-v1 protocol"
+            );
         };
 
         let mut state = WaylandState {

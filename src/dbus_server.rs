@@ -3,14 +3,14 @@ use std::os::fd::{AsRawFd, RawFd};
 
 use anyhow::Result;
 use rustbus::{
+    DuplexConn, MessageBuilder,
     connection::Timeout,
     get_session_bus_path,
     message_builder::MarshalledMessage,
     params::{Param, Variant},
     wire::unmarshal::traits::Variant as UnVariant,
-    DuplexConn, MessageBuilder,
 };
-use rustbus_service::{rustbus, Access, InterfaceImp, MethodContext, PropContext, Service};
+use rustbus_service::{Access, InterfaceImp, MethodContext, PropContext, Service, rustbus};
 
 use crate::color::Color;
 use crate::wayland::WaylandState;

@@ -5,8 +5,8 @@ use std::{
 
 use anyhow::Result;
 use rustbus_service::rustbus::{
-    self, connection::Timeout, get_session_bus_path, standard_messages,
-    wire::unmarshal::traits::Variant as UnVariant, DuplexConn, MessageBuilder, MessageType,
+    self, DuplexConn, MessageBuilder, MessageType, connection::Timeout, get_session_bus_path,
+    standard_messages, wire::unmarshal::traits::Variant as UnVariant,
 };
 
 pub struct DbusClient {

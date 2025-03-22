@@ -32,7 +32,7 @@ jobs:
       - name: Get required packages
         run: sudo apt-get install fd-find
       - name: Fmt check
-        run: rustfmt --check --edition 2021 $(fdfind -e rs)
+        run: rustfmt --check --edition 2024 $(fdfind -e rs)
 
   clippy:
     name: Clippy
